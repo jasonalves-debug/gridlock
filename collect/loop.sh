@@ -19,7 +19,8 @@ publish() { # replace the data branch with one commit holding the current files
 
 for round in $(seq 1 "$ROUNDS"); do
   started=$(date +%s); echo "── round $round/$ROUNDS $(date -u +%T)"
-  python collect/run.py static-due || echo "::warning::static feed failed"            # daily: timetables, cameras, schools...
+  if [ "$round" -eq 1 ] && [ -n "${FORCE_STATIC:-}" ]; then python collect/run.py static || echo "::warning::static feed failed"   # asked for by hand
+  else python collect/run.py static-due || echo "::warning::static feed failed"; fi       # daily: timetables, cameras, schools...
   python collect/police_fire.py   || echo "::warning::police/fire failed"            # TPS + TFS calls → incidents.json
   if [ $(( round % 3 )) -eq 1 ]; then python collect/roadwork.py || echo "::warning::roadwork failed"; fi   # City road restrictions, every 15 min
   python collect/run.py live      || echo "::warning::live feed failed"              # → gridlock_live.json

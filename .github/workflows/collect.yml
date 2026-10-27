@@ -5,7 +5,12 @@ name: Collect GRIDLOCK data
 on:
   schedule:
     - cron: '*/15 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      static:
+        description: 'Rebuild the daily data (timetables, cameras...) right away'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,4 +31,5 @@ jobs:
       - name: Collect every 5 minutes
         env:
           ONTARIO511_KEY: ${{ secrets.ONTARIO511_KEY }}
+          FORCE_STATIC: ${{ inputs.static && '1' || '' }}
         run: bash collect/loop.sh
