@@ -16,12 +16,13 @@ def static_due():
     from datetime import datetime, timezone
     from gridlock.common import path
     try:
-        g = json.load(open(path("gridlock_static.json")))["generated"]
-        age = (datetime.now(timezone.utc) - datetime.fromisoformat(g.replace("Z", "+00:00"))).total_seconds()
+        d = json.load(open(path("gridlock_static.json")))
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(d["generated"].replace("Z", "+00:00"))).total_seconds()
+        broken = [k for k, v in (d.get("status") or {}).items() if str(v).startswith("down")]
     except Exception:  # noqa: BLE001 - missing or unreadable: build it
-        age = 1e9
-    if age > 20 * 3600:
-        print(f"static feed is {age / 3600:.1f} h old: rebuilding")
+        age, broken = 1e9, []
+    if age > 20 * 3600 or (broken and age > 2 * 3600):  # daily, or every 2 h while a source is failing
+        print(f"static feed is {age / 3600:.1f} h old{' with ' + ', '.join(broken) + ' failing' if broken else ''}: rebuilding")
         static.build()
     else:
         print(f"static feed is {age / 3600:.1f} h old: fine")

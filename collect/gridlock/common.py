@@ -39,7 +39,7 @@ def iso_to_epoch(s):
 
 
 # ───────────────────────── HTTP ─────────────────────────
-def get(url, params=None, timeout=60, raw=False, data=None, tries=2):
+def get(url, params=None, timeout=60, raw=False, data=None, tries=3):
     if params:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params, doseq=True)
     last = None
@@ -51,7 +51,7 @@ def get(url, params=None, timeout=60, raw=False, data=None, tries=2):
             return body if raw else json.loads(body.decode("utf-8-sig"))
         except Exception as e:  # noqa: BLE001 — retried, then re-raised
             last = e
-            time.sleep(2 + attempt * 3)
+            time.sleep(2 + attempt * 8)  # City servers often 502 for a few seconds
     raise last
 
 
