@@ -375,6 +375,7 @@ def geocode_query(cache, key, params, budget):
                                 headers={"User-Agent": NOMINATIM_UA})
     except Exception as e:
         print(f"  [geocode failed] {params}: {e}", file=sys.stderr)
+        FIRE_DIAG["geofail"] = str(e)[:80]
         return None
     budget[0] -= 1
     time.sleep(1)  # respect Nominatim's 1 req/sec usage policy
@@ -440,13 +441,18 @@ def build_location(ev, budget, cache):
     return None, "Toronto", True
 
 
+FIRE_DIAG = {}  # what the last fetch saw, for the status line
+
+
 def fetch_fire():
     cache = load_geocode_cache()
     budget = [MAX_NEW_GEOCODES]
-    out = []
-    for ev in fetch_fire_events():
+    out, evs = [], fetch_fire_events()
+    FIRE_DIAG.clear(); FIRE_DIAG.update(events=len(evs), unplaced=0)
+    for ev in evs:
         geo, location, approx = build_location(ev, budget, cache)
         if not geo:
+            FIRE_DIAG["unplaced"] += 1
             continue  # not geocoded yet — appears once cache fills in on a later run
         ts = ev["dispatch_time"]
         try:
@@ -686,8 +692,10 @@ def main():
 
     try:
         fire = fetch_fire()
-        status["fire"] = "live"
-        print(f"[fire] {len(fire)} incidents")
+        status["fire"] = "live" if FIRE_DIAG.get("events") else "live, but the City feed listed no active calls"
+        if FIRE_DIAG.get("unplaced"):
+            status["fire"] += f" ({FIRE_DIAG['unplaced']} of {FIRE_DIAG['events']} not on the map yet: " + (f"address lookup failing: {FIRE_DIAG['geofail']})" if FIRE_DIAG.get("geofail") else "address lookup pending)")
+        print(f"[fire] {len(fire)} incidents from {FIRE_DIAG.get('events')} events ({FIRE_DIAG.get('unplaced')} not placed)")
     except Exception as e:
         status["fire"] = f"error: {e}"
         print(f"[fire] FAILED: {e}", file=sys.stderr)

@@ -63,7 +63,7 @@ async function liveAfterReady() { // real calls go in once the player is watchin
 }
 function countOnScene() { return incidents.filter(i => i.real && i.state !== 'cleared').length || 'Several'; }
 async function liveRefresh() {
-  if (!ready) return; const before = LV.feed && LV.feed.generated; await loadFeed(false); if (!LV.feed || LV.feed.generated === before) return;
+  if (!ready) return; const before = LV.feed && LV.feed.generated; await loadFeed(false); if (!LV.feed || LV.feed.generated === before) return; if (H24.on) h24Bar();
   await cmd('liveFeed', { live: LV.feed }, { calls: LV.kind === 'live' });
 }
 
@@ -236,6 +236,8 @@ function liveOverlay(c) {
   if (wpp < 3 && wl && wl.rb) for (const b of wl.rb) { const p = R.project(b[2], b[3], 2); if (inView(p)) hit({ k: 'rbus', id: b[0] }, p); } // real buses: tap the bus
   if (wpp < 3) enf().forEach((en, i) => { const p = R.project(en.x, en.y, 0); if (!inView(p)) return; badge(c, p[0], p[1], en.k === 'red' ? 'redlight' : 'speedcam', en.k === 'red' ? '#ff4b4b' : '#ffd23f', 7, false); hit({ k: 'enf', id: i }, p); });
   if (wl && wl.blk) for (const k of wl.blk) { const p = R.project(k[1], k[2], 0); if (!inView(p)) continue; badge(c, p[0], p[1] - 14, 'bus', '#ff7a00', wpp < 6 ? 11 : 8, true); hit({ k: 'blk', id: k[0] }, [p[0], p[1] - 14]); } // possible blockages
+  if (H24.on) { for (const o of h24calls()) { if (H24.f && o.t !== H24.f) continue; const p = R.project(o.x, o.y, 0); if (!inView(p)) continue; // last 24 h: brighter = more recent
+      const a = Math.max(0.3, 1 - o.age / 86400 * 0.7); c.globalAlpha = a; c.fillStyle = H24COL[o.t]; c.beginPath(); c.arc(p[0], p[1], o.age < 3600 ? 6 : 4.5, 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.65)'; c.lineWidth = 1; c.stroke(); c.globalAlpha = 1; hit({ k: 'h24', id: o.c.id }, p); } }
   if (wpp < 4) cams().forEach((cm, i) => { const p = R.project(cm.x, cm.y, 0); if (!inView(p)) return; badge(c, p[0], p[1], 'camera', '#52c7ff', 8, false); hit({ k: 'cam', id: i }, p); });
   // apartment towers are tappable close up (no marker: the building is the marker)
   if (wpp < 1.5) ws.towers.forEach((tw, i) => { if (tw[2] < 6) return; const p = R.project(tw[0], tw[1], tw[2] * 1.5); if (inView(p)) hit({ k: 'tower', id: i }, p); });
@@ -246,12 +248,28 @@ function liveOverlay(c) {
 function pickWorld(px, py) { let best = null, bd = 20 * 20; for (const h of LV.hits) { const d = (h.x - px) ** 2 + (h.y - py) ** 2; if (d < bd) { bd = d; best = h.sel; } } return best; }
 
 // ---------------------------------------------------------------- inspect sheets
-const WORLD_SEL = new Set(['zone', 'spot', 'school', 'worship', 'site', 'shuttle', 'tower', 'rbus', 'cam', 'live', 'blk', 'enf']);
+const WORLD_SEL = new Set(['zone', 'spot', 'school', 'worship', 'site', 'shuttle', 'tower', 'rbus', 'cam', 'live', 'blk', 'enf', 'h24']);
 // ---------------- traffic cameras (City intersections + 511 highways): tap for the latest still, refreshed every minute while open
 let CAMS = null;
 function cams() { // [{src, name, x, y, views: [[label, url]]}] in map coordinates
   if (CAMS || !LV.stat || !LV.stat.cameras) return CAMS || []; const P = G.proj;
   return (CAMS = LV.stat.cameras.map(c => Object.assign({}, c, { x: (c.lng - P.lon0) * P.kx, y: -(c.lat - P.lat0) * P.ky }))); }
+// ---------------- last 24 hours: every real police / fire / medical call, fading with age. On by default in Today, Replayed.
+const H24 = { on: false, f: null, cache: null, at: 0 }; // f: null = all types, or 'police' | 'fire' | 'medical'
+const H24COL = { police: '#52c7ff', fire: '#ff8a1f', medical: '#ff4f6d' };
+function h24calls() { // [{c, t, x, y, age}] — recomputed at most every 5 s
+  const nowMs = Date.now(); if (H24.cache && nowMs - H24.at < 5000) return H24.cache; const now = nowMs / 1000, P = G.proj; H24.at = nowMs;
+  return (H24.cache = ((LV.feed && LV.feed.calls) || []).filter(c => now - c.ts < 86400 && now - c.ts > -600)
+    .map(c => ({ c, t: c.src === 'tps' ? 'police' : c.act === 'medical' ? 'medical' : 'fire', x: (c.lng - P.lon0) * P.kx, y: -(c.lat - P.lat0) * P.ky, age: Math.max(0, now - c.ts) }))); }
+function h24Set(on) { H24.on = on; const b = $('h24Btn'); if (b) b.setAttribute('aria-pressed', String(on)); h24Bar(); }
+function h24Bar() {
+  const el = $('h24bar'); if (!el) return; if (!H24.on) { el.hidden = true; return; } H24.cache = null; const L = h24calls(), n = t => L.filter(o => o.t === t).length;
+  const span = L.length ? Math.round(Math.max(...L.map(o => o.age)) / 3600) : 0;
+  el.hidden = false; el.innerHTML = `<b>${span >= 23 ? 'Last 24 h' : L.length ? `Last ${Math.max(1, span)} h (filling to 24)` : 'Last 24 h'}</b>`
+    + ['police', 'fire', 'medical'].map(t => `<button type="button" data-h24="${t}" aria-pressed="${H24.f === t}" style="--c:${H24COL[t]}"><i></i>${n(t)} ${t}</button>`).join('') + (L.length ? '' : '<span>No calls yet</span>');
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-h24]'); if (b) { H24.f = H24.f === b.dataset.h24 ? null : b.dataset.h24; h24Bar(); return; } if (e.target.closest && e.target.closest('#h24Btn')) h24Set(!H24.on); });
+setInterval(() => { if (H24.on) h24Bar(); }, 60000);
 let ENF = null;
 function enf() { // speed + red-light cameras [{k, name, x, y, since}]
   if (ENF || !LV.stat || !LV.stat.enforce) return ENF || []; const P = G.proj;
@@ -311,9 +329,10 @@ addEventListener('keydown', e => { if (CAMFS.on && e.key === 'Escape') { e.stopP
 function worldItem(sel) { const ws = LV.ws; if (!ws) return null;
   if (sel.k === 'zone') return LV.zones.find(z => z.id === sel.id); if (sel.k === 'shuttle') return ws.shuttles.find(s => s.id === sel.id);
   if (sel.k === 'rbus') return LV.wl && LV.wl.rb.find(b => b[0] === sel.id); if (sel.k === 'cam') return cams()[sel.id];
+  if (sel.k === 'h24') return h24calls().find(o => o.c.id === sel.id);
   if (sel.k === 'blk') return LV.wl && (LV.wl.blk || []).find(b => b[0] === sel.id); if (sel.k === 'enf') return enf()[sel.id];
   const list = { spot: ws.spots, school: ws.schools, worship: ws.worship, site: ws.sites, tower: ws.towers }[sel.k]; return list ? list[sel.id] : null; }
-function worldPos(sel) { const it = worldItem(sel); if (!it) return null; if (sel.k === 'tower') return [it[0], it[1]]; if (sel.k === 'rbus') return [it[2], it[3]]; if (sel.k === 'blk') return [it[1], it[2]]; if (sel.k === 'shuttle') return it.pts[it.pts.length >> 1]; return [it.x, it.y]; }
+function worldPos(sel) { const it = worldItem(sel); if (!it) return null; if (sel.k === 'tower') return [it[0], it[1]]; if (sel.k === 'rbus') return [it[2], it[3]]; if (sel.k === 'blk') return [it[1], it[2]]; if (sel.k === 'h24') return [it.x, it.y]; if (sel.k === 'shuttle') return it.pts[it.pts.length >> 1]; return [it.x, it.y]; }
 function worldSheetKey(sel) { const wl = LV.wl || {}; return sel.k + sel.id + (LV.feed && LV.feed.generated) + (sel.k === 'school' ? JSON.stringify((wl.schools || []).find(q => q[0] === sel.id)) : sel.k === 'worship' ? (wl.worship || []).includes(sel.id) : sel.k === 'site' ? (wl.sites || []).includes(sel.id) : sel.k === 'rbus' ? String((worldItem(sel) || [])[4]) : sel.k === 'blk' ? JSON.stringify(worldItem(sel)) : ''); }
 const head = (icon, col, title, sub) => `<div class="sh-head">${svg(icon, col)}<div><h2>${esc(title)}</h2><div class="sub">${esc(sub)}</div></div><button class="sh-x" type="button" aria-label="Close">×</button></div>`;
 const facts = rows => `<div class="facts">${rows.map(([b, s]) => `<div class="fact"><b${String(b).length > 9 ? ' style="font-size:13px"' : ''}>${b}</b><span>${s}</span></div>`).join('')}</div>`;
@@ -352,6 +371,11 @@ function worldSheetHtml(sel) {
     case 'rbus': { const [num, route, , , kmh] = it, r = ((LV.stat && LV.stat.ttc) || []).find(q => q.route === route);
       return head('bus', '#ff4b4b', `${route} ${r ? r.name : ''}`.trim(), 'Real TTC bus · live GPS') + facts([[kmh == null ? '—' : kmh < 2 ? 'Stopped' : kmh + ' km/h', 'Speed lately'], [esc(num), 'Bus number']])
         + body("This is where the real bus is, updated every 20 seconds. When real buses crawl on a road, the game's cars there slow down to match.", "TTC GTFS-Realtime vehicle positions"); }
+    case 'h24': { const { c, t, age } = it, when = new Date(c.ts * 1000).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' }),
+        ago = age < 3600 ? Math.max(1, Math.round(age / 60)) + ' min ago' : (age / 3600).toFixed(1).replace(/\.0$/, '') + ' h ago';
+      return head(t, H24COL[t], c.label || (t === 'police' ? 'Police call' : 'Fire call'), c.loc || 'Scarborough')
+        + facts([[esc(when), 'Time'], [ago, 'How long ago'], [t === 'police' ? 'Police' + (c.div ? ' · ' + esc(String(c.div)) : '') : 'Fire', 'Responded']])
+        + body((c.units && c.units.length ? `Units: ${esc(c.units.join(', '))}. ` : '') + 'One of the real calls from the last 24 hours.', t === 'police' ? 'Toronto Police calls for service' : 'Toronto Fire active incidents'); }
     case 'blk': { const [, x, y, n, routes, mins, road] = it, ci = nearestCam(x, y);
       return head('bus', '#ff7a00', 'Possible blockage', road || 'Scarborough') + facts([[n, 'Buses stopped'], [mins + ' min', 'Not moving'], [esc(routes), 'Routes']])
         + body(`${n} real TTC buses have been stopped here for ${mins} minutes, away from any station or end of the line. That usually means something is blocking the road (a crash, a stalled vehicle, police activity) before it shows up in any official feed. Cars here are slowed down while it lasts.`, 'TTC live bus GPS, read by GRIDLOCK')
