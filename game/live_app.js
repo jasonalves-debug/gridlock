@@ -237,7 +237,8 @@ function liveOverlay(c) {
   if (wpp < 3) enf().forEach((en, i) => { const p = R.project(en.x, en.y, 0); if (!inView(p)) return; badge(c, p[0], p[1], en.k === 'red' ? 'redlight' : 'speedcam', en.k === 'red' ? '#ff4b4b' : '#ffd23f', 7, false); hit({ k: 'enf', id: i }, p); });
   if (wl && wl.blk) for (const k of wl.blk) { const p = R.project(k[1], k[2], 0); if (!inView(p)) continue; badge(c, p[0], p[1] - 14, 'bus', '#ff7a00', wpp < 6 ? 11 : 8, true); hit({ k: 'blk', id: k[0] }, [p[0], p[1] - 14]); } // possible blockages
   if (H24.on) { for (const o of h24calls()) { if (H24.f && o.t !== H24.f) continue; const p = R.project(o.x, o.y, 0); if (!inView(p)) continue; // last 24 h: brighter = more recent
-      const a = Math.max(0.3, 1 - o.age / 86400 * 0.7); c.globalAlpha = a; c.fillStyle = H24COL[o.t]; c.beginPath(); c.arc(p[0], p[1], o.age < 3600 ? 6 : 4.5, 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.65)'; c.lineWidth = 1; c.stroke(); c.globalAlpha = 1; hit({ k: 'h24', id: o.c.id }, p); } }
+      const a = Math.max(0.45, 1 - o.age / 86400 * 0.55), r = (wpp > 8 ? 7 : wpp > 3 ? 9 : 11) + (o.age < 3600 ? 2 : 0); // badge: type icon in a coloured ring; fresh ones bigger and pulsing
+      c.globalAlpha = a; badge(c, p[0], p[1] - r, o.t, H24COL[o.t], r, o.age < 3600); c.fillStyle = H24COL[o.t]; c.beginPath(); c.moveTo(p[0] - 3, p[1] - 2); c.lineTo(p[0] + 3, p[1] - 2); c.lineTo(p[0], p[1] + 2); c.fill(); c.globalAlpha = 1; hit({ k: 'h24', id: o.c.id }, [p[0], p[1] - r]); } }
   if (wpp < 4) cams().forEach((cm, i) => { const p = R.project(cm.x, cm.y, 0); if (!inView(p)) return; badge(c, p[0], p[1], 'camera', '#52c7ff', 8, false); hit({ k: 'cam', id: i }, p); });
   // apartment towers are tappable close up (no marker: the building is the marker)
   if (wpp < 1.5) ws.towers.forEach((tw, i) => { if (tw[2] < 6) return; const p = R.project(tw[0], tw[1], tw[2] * 1.5); if (inView(p)) hit({ k: 'tower', id: i }, p); });

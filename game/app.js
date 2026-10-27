@@ -477,7 +477,7 @@ function drawOverlay() {
   // units at overview zoom
   if (wpp > 4) for (const u of units) { const p = R.project(u.x, u.y, 0); if (!p) continue; const col = u.kind === 'police' ? '#52c7ff' : u.kind === 'ems' ? '#ff4438' : u.kind === 'tow' ? '#ffb020' : u.kind === 'hydro' ? '#ff8a1f' : '#52a8ff'; c.fillStyle = col; c.beginPath(); c.arc(p[0], p[1], 3.5, 0, 7); c.fill(); if (u.state === 'enroute' && (performance.now() / 300 | 0) % 2) { c.strokeStyle = col; c.lineWidth = 1.5; c.beginPath(); c.arc(p[0], p[1], 7, 0, 7); c.stroke(); } }
   // incident markers
-  for (const i of incidents) { if (i.state === 'cleared') continue; const p = R.project(i.x, i.y, 0); if (!p) continue; const m = im(i); const x = p[0], y = p[1] - 22; if (i.type === 'call' && cam.wpp > 9 && !(i.act === 'police_crit' || i.act === 'fire_struct' || i.act === 'gas')) { c.fillStyle = m.col; c.beginPath(); c.arc(x, y + 18, 4, 0, 7); c.fill(); continue; }
+  for (const i of incidents) { if (i.state === 'cleared') continue; const p = R.project(i.x, i.y, 0); if (!p) continue; const m = im(i); const x = p[0], y = p[1] - 22; if (i.type === 'call' && cam.wpp > 9 && !(i.act === 'police_crit' || i.act === 'fire_struct' || i.act === 'gas')) { if (H24.on) continue; c.fillStyle = m.col; c.beginPath(); c.arc(x, y + 18, 4, 0, 7); c.fill(); continue; }
     const work = (i.type === 'hwy' && !i.crash) || i.type === 'roadclosed';
     if (work) { // planned work / closures: amber diamond road sign, no pulse
       c.fillStyle = '#ffb020'; c.beginPath(); c.moveTo(x, y - 17); c.lineTo(x + 17, y); c.lineTo(x, y + 17); c.lineTo(x - 17, y); c.closePath(); c.fill(); c.lineWidth = 2; c.strokeStyle = '#1a1205'; c.stroke();
