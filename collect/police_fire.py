@@ -21,6 +21,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
+import local_geo  # Scarborough intersections + postal areas from GRIDLOCK's own road graph
+
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 BROWSER_HEADERS = {
     "User-Agent": UA,
@@ -401,7 +403,7 @@ def build_location(ev, budget, cache):
     # and the frontend renders these as a soft area circle, not a pin.
     if FSA_RE.match(prime_raw) and not cross_parts:
         key = f"fsa2:{prime_raw}"  # bumped from fsa: — forces re-geocode of anything cached under the old, less accurate free-form method
-        geo = geocode_query(cache, key, {"postalcode": prime_raw, "country": "Canada"}, budget)
+        geo = local_geo.fsa_point(prime_raw, ev.get("event_num") or ev.get("dispatch_time")) or geocode_query(cache, key, {"postalcode": prime_raw, "country": "Canada"}, budget)
         return geo, f"{prime_raw} (approximate area)", True
 
     # Split "STREET NAME, NY" -> street + borough
@@ -417,7 +419,7 @@ def build_location(ev, budget, cache):
         a, b = cross_parts[0], cross_parts[1]
         key = f"xx:{a.lower()}|{b.lower()}"
         query = f"{a} & {b}, Toronto, Ontario, Canada"
-        geo = geocode_query(cache, key, {"q": query}, budget)
+        geo = local_geo.intersection(a, b) or geocode_query(cache, key, {"q": query}, budget)
         return geo, f"{a} & {b}", False
 
     # Case 3: normal "street + first cross street" intersection
@@ -427,7 +429,7 @@ def build_location(ev, budget, cache):
         loc_label = f"{borough} - " if borough else ""
         borough_part = f"{borough}, " if borough and borough != "Toronto" else ""
         query = f"{street} & {cross}, {borough_part}Toronto, Ontario, Canada"
-        geo = geocode_query(cache, key, {"q": query}, budget)
+        geo = local_geo.intersection(street, cross) or (local_geo.intersection(street, cross_parts[1]) if len(cross_parts) > 1 else None) or geocode_query(cache, key, {"q": query}, budget)
         return geo, f"{loc_label}{street} & {cross}", False
 
     # Case 4: street with no cross street at all — geocode the street + borough, low precision
