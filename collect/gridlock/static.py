@@ -43,9 +43,14 @@ def gtfs_zip(url):
             z = zipfile.ZipFile(io.BytesIO(z.read(inner)))
     names = {n.rsplit("/", 1)[-1]: n for n in z.namelist()}  # files may sit in a sub-folder
 
+    raw = [f"{i.filename} ({i.file_size // 1024} KB)" for i in z.infolist()]
+
     class Z:  # namelist() reports bare file names, whatever the folder layout
         def namelist(self):
-            return list(names)
+            return [n for n in names if n]
+
+        def describe(self):
+            return ", ".join(raw[:8]) or "empty zip"
 
     def rows(name):
         with z.open(names.get(name, name)) as f:
@@ -67,7 +72,7 @@ def ttc():
         z, rows = gtfs_zip(res["url"])
         if "routes.txt" in z.namelist() and "stop_times.txt" in z.namelist():
             break
-        seen.append(f"{res.get('name')}: {', '.join(sorted(z.namelist())[:6])}")
+        seen.append(f"{res.get('name')} ({res.get('url', '')[-60:]}): {z.describe()}")
     else:
         raise RuntimeError("no GTFS zip in the TTC dataset; zips seen: " + " | ".join(seen)[:300])
     routes = {r["route_id"]: r for r in rows("routes.txt")}
