@@ -1,0 +1,4 @@
+data/
+game/out/
+game/shots/
+__pycache__/

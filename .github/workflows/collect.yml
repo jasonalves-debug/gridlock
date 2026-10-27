@@ -1,0 +1,29 @@
+name: Collect GRIDLOCK data
+
+# GitHub's scheduler only fires every few hours in practice, so each run keeps going for ~5.3 hours
+# (collect/loop.sh); the schedule queues the next one so collection runs around the clock.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect every 5 minutes
+        env:
+          ONTARIO511_KEY: ${{ secrets.ONTARIO511_KEY }}
+        run: bash collect/loop.sh
