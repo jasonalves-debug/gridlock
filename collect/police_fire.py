@@ -454,7 +454,8 @@ def fetch_fire():
     for ev in evs:
         geo, location, approx = build_location(ev, budget, cache)
         if not geo:
-            FIRE_DIAG["unplaced"] += 1
+            if re.search(r",\s*SC\b|^M1", ev["prime_street"]):  # only Scarborough misses matter to GRIDLOCK
+                FIRE_DIAG["unplaced"] += 1
             continue  # not geocoded yet — appears once cache fills in on a later run
         ts = ev["dispatch_time"]
         try:
@@ -696,7 +697,7 @@ def main():
         fire = fetch_fire()
         status["fire"] = "live" if FIRE_DIAG.get("events") else "live, but the City feed listed no active calls"
         if FIRE_DIAG.get("unplaced"):
-            status["fire"] += f" ({FIRE_DIAG['unplaced']} of {FIRE_DIAG['events']} not on the map yet: " + (f"address lookup failing: {FIRE_DIAG['geofail']})" if FIRE_DIAG.get("geofail") else "address lookup pending)")
+            status["fire"] += f" ({FIRE_DIAG['unplaced']} Scarborough call(s) not on the map: " + (f"address lookup failing: {FIRE_DIAG['geofail']})" if FIRE_DIAG.get("geofail") else "address not found)")
         print(f"[fire] {len(fire)} incidents from {FIRE_DIAG.get('events')} events ({FIRE_DIAG.get('unplaced')} not placed)")
     except Exception as e:
         status["fire"] = f"error: {e}"
