@@ -37,11 +37,20 @@ def fire_stations():
 # ───────────────────────── GTFS helpers ─────────────────────────
 def gtfs_zip(url):
     z = zipfile.ZipFile(io.BytesIO(get(url, timeout=300, raw=True)))
+    if not any(n.rsplit("/", 1)[-1] == "routes.txt" for n in z.namelist()):  # GTFS packed inside another zip
+        inner = next((n for n in z.namelist() if n.lower().endswith(".zip") and "gtfs" in n.lower()), None) or next((n for n in z.namelist() if n.lower().endswith(".zip")), None)
+        if inner:
+            z = zipfile.ZipFile(io.BytesIO(z.read(inner)))
+    names = {n.rsplit("/", 1)[-1]: n for n in z.namelist()}  # files may sit in a sub-folder
+
+    class Z:  # namelist() reports bare file names, whatever the folder layout
+        def namelist(self):
+            return list(names)
 
     def rows(name):
-        with z.open(name) as f:
+        with z.open(names.get(name, name)) as f:
             yield from csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-    return z, rows
+    return Z(), rows
 
 
 def secs(hms):
