@@ -57,8 +57,9 @@ async function liveAfterReady() { // real calls go in once the player is watchin
     if (LV.kind === 'live') setTimeout(() => DIR.say('anchor', ['a:open', 'a:live'], 2), 2500);
     toast('LIVE', LV.kind === 'live' ? `Real Scarborough, ${timeOf(Date.now() / 1000)}. ${r.calls ? countOnScene() + ' real calls on scene, ' : ''}${r.zonesOn || 0} work zones active, ${spots} reported road hazards${r.busRoutes ? ', ' + r.busRoutes + ' TTC routes running' : ''}.` : `Replaying the last 24 hours: ${r.queue} real calls coming up. Use ⏭ to skip ahead.`, 'var(--green)');
   }
-  if (LV.kind === 'live' || (mode === 'watch' && !LV.kind)) { clearInterval(LV.timer); LV.timer = setInterval(liveRefresh, 2 * 60 * 1000); // upstream refreshes every 5 min; check every 2 so new data lands within ~2 min }
-  if (LV.kind === 'live' && BUS_RELAY) { pollBuses(); setInterval(pollBuses, 20000); // the relay caches the TTC feed for 20 s document.addEventListener('visibilitychange', () => { if (!document.hidden) pollBuses(); }); }
+  // upstream refreshes every 5 min; check every 2 so new data lands within ~2 min. Buses: the relay caches the TTC feed for 20 s.
+  if (LV.kind === 'live' || (mode === 'watch' && !LV.kind)) { clearInterval(LV.timer); LV.timer = setInterval(liveRefresh, 2 * 60 * 1000); }
+  if (LV.kind === 'live' && BUS_RELAY) { pollBuses(); setInterval(pollBuses, 20000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollBuses(); }); }
 }
 function countOnScene() { return incidents.filter(i => i.real && i.state !== 'cleared').length || 'Several'; }
 async function liveRefresh() {

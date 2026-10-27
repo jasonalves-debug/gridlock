@@ -51,3 +51,15 @@ full = ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name
 open(os.path.join(OUT, 'gridlock.html'), 'w', encoding='utf-8').write(full)
 shutil.copy('out/gridlock.html', '../gridlock.html')  # the downloadable game, at the repo root
 print(f'artifact {len(body):,}  standalone {len(full):,}  voice clips {len(V["clips"])}')
+
+# syntax check every inline script, so a broken build never ships (needs Node; skipped if it isn't installed)
+import subprocess, tempfile
+if shutil.which('node'):
+    bad = 0
+    for i, (attrs, js) in enumerate(re.findall(r'<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>', full, re.S)):
+        if 'application/json' in attrs: continue  # data, not code (the sim worker's source, text/plain, is checked)
+        with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False, encoding='utf-8') as t: t.write(js)
+        r = subprocess.run(['node', '--check', t.name], capture_output=True, text=True); os.unlink(t.name)
+        if r.returncode: bad += 1; print(f'SYNTAX ERROR in inline script {i}:\n' + r.stderr[:800])
+    if bad: raise SystemExit(f'build has {bad} broken script(s)')
+    print('syntax check ok')
