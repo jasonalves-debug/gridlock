@@ -201,7 +201,7 @@ function buildHud() {
   $('speedBtn').onclick = () => { setSpeed(speeds[(speeds.indexOf(lastSpeed) + 1) % speeds.length]); snd('ui'); };
   $('statBtn').onclick = () => togglePanel('chips', 'statBtn'); $('incBtn').onclick = () => togglePanel('feed', 'incBtn');
   $('progWrap').hidden = mode !== 'shift';
-  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn)').forEach(b => b.remove());
+  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn):not(#h24Btn)').forEach(b => b.remove());
   const tools = [['traffic', 'Traffic colours'], ['tilt', '3D view'], ['sign', 'Warning sign'], ['local', 'Local traffic only'], ['inspect', 'Inspect']];
   if (mode === 'whatif') tools.splice(4, 0, ['cause', 'Cause trouble']);
   tools.forEach(([k, l], i) => { const b = document.createElement('button'); b.className = 'tool' + (i === 0 || i === 2 ? ' sep' : ''); b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(k === 'cause' ? 'crash' : k); b.onclick = () => onTool(k); tr.appendChild(b); });
@@ -218,7 +218,7 @@ function togglePanel(id, btn) { // stats row and incident list: open on tap, clo
   if (open) { updateHud(); updateFeed(); } layout();
 }
 function syncTools() {
-  document.querySelectorAll('.tool').forEach(b => { const k = b.id.slice(5); let on = k === tool; if (k === 'traffic') on = overlayOn; if (k === 'tilt') on = tiltGoal > 0.1; if (k === 'cause') on = !$('causeRow').hidden; if (k === 'rain') on = !!rainOn; b.setAttribute('aria-pressed', String(on)); });
+  document.querySelectorAll('.tool').forEach(b => { const k = b.id.slice(5); let on = k === tool; if (k === 'traffic') on = overlayOn; if (k === 'tilt') on = tiltGoal > 0.1; if (k === 'cause') on = !$('causeRow').hidden; if (k === 'rain') on = !!rainOn; if (b.id === 'h24Btn') on = H24.on; b.setAttribute('aria-pressed', String(on)); });
   const hints = { local: 'Tap a neighbourhood street to make it local traffic only. Tap again to remove.', sign: 'Tap where drivers should see a warning sign. They will reroute.', crash: 'Tap a road to cause a crash.', water: 'Tap a road to break a water main under it.', closure: 'Tap an intersection to have police close it.', power: 'Tap a spot to cut the power there.', close: 'Tap a road to close or reopen it.' };
   const h = $('hint'); if (hints[tool]) { h.textContent = hints[tool]; h.hidden = false; } else h.hidden = true;
 }
