@@ -15,7 +15,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
-from .common import (SCARB_FSA, Status, ckan_resource, clip_line, datastore, datastore_rows, get, inbox, load, metres,
+from .common import (SCARB_FSA, Status, ckan_resource, ckan_resources, clip_line, datastore, datastore_rows, get, inbox, load, metres,
                      now_utc, point_of, save, simplify, stamp, TORONTO)
 
 OUT = "gridlock_static.json"
@@ -60,8 +60,16 @@ def secs(hms):
 
 # ───────────────────────── TTC: bus routes, frequencies, subway stations ─────────────────────────
 def ttc():
-    url = ckan_resource("ttc-routes-and-schedules", lambda r: (r.get("format") or "").lower() == "zip")["url"]
-    z, rows = gtfs_zip(url)
+    # the dataset can hold several zips (GTFS plus other packages): use the first one that is actually GTFS
+    zips = [r for r in ckan_resources("ttc-routes-and-schedules") if (r.get("format") or "").lower() == "zip" or (r.get("url") or "").lower().endswith(".zip")]
+    seen = []
+    for res in zips:
+        z, rows = gtfs_zip(res["url"])
+        if "routes.txt" in z.namelist() and "stop_times.txt" in z.namelist():
+            break
+        seen.append(f"{res.get('name')}: {', '.join(sorted(z.namelist())[:6])}")
+    else:
+        raise RuntimeError("no GTFS zip in the TTC dataset; zips seen: " + " | ".join(seen)[:300])
     routes = {r["route_id"]: r for r in rows("routes.txt")}
     bus = {rid for rid, r in routes.items() if r.get("route_type") == "3"}
     subway = {rid for rid, r in routes.items() if r.get("route_type") == "1"}
