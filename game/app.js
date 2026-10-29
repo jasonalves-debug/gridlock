@@ -498,22 +498,29 @@ function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcT
 let FONT = null, MONO = null; function getFont() { return FONT || (FONT = getComputedStyle(document.documentElement).getPropertyValue('--f-display')); } function getMono() { return MONO || (MONO = getComputedStyle(document.documentElement).getPropertyValue('--f-mono')); }
 
 // ---------------------------------------------------------------- audio
-let AC = null, master = null, bed = null, rainG = null, sirenG = null, sirenO = null, noiseB = null, muted = store.get('muted', false);
+let AC = null, master = null, amb = null, nearG = null, windG = null, pbT = 1, abT = 15, birdT = 4, bed = null, rainG = null, sirenG = null, sirenO = null, noiseB = null, muted = store.get('muted', false);
 function audioInit() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
   try { AC = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 0.1 }); } catch (e) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e2) { return; } }
   const lim = AC.createDynamicsCompressor(); lim.threshold.value = -2; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.2;
   const ceil = AC.createWaveShaper(); const cv = new Float32Array(2048); for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; cv[i] = Math.tanh(x * 1.1) / Math.tanh(1.1) * 0.93; } ceil.curve = cv;
   master = AC.createGain(); master.gain.value = muted ? 0 : 0.8; master.connect(lim); lim.connect(ceil); ceil.connect(AC.destination);
+  // ambience bus: dry plus a generated outdoor reverb, so distant sounds sit back in the city instead of on top of it
+  amb = AC.createGain(); amb.connect(master); const verb = AC.createConvolver(); verb.buffer = makeIR(2.6); const wet = AC.createGain(); wet.gain.value = 0.3; amb.connect(verb); verb.connect(wet); wet.connect(master);
   noiseB = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const nd = noiseB.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   const brown = AC.createBuffer(1, AC.sampleRate * 3, AC.sampleRate), bd = brown.getChannelData(0); let b = 0; for (let i = 0; i < bd.length; i++) { b = (b + 0.02 * (Math.random() * 2 - 1)) / 1.02; bd[i] = b * 3.3; }
-  const bs = AC.createBufferSource(); bs.buffer = brown; bs.loop = true; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; bed = AC.createGain(); bed.gain.value = 0.0; bs.connect(lp); lp.connect(bed); bed.connect(master); bs.start(); bed.lp = lp;
-  const rs = AC.createBufferSource(); rs.buffer = noiseB; rs.loop = true; const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400; rainG = AC.createGain(); rainG.gain.value = 0; rs.connect(hp); hp.connect(rainG); rainG.connect(master); rs.start();
+  const bs = AC.createBufferSource(); bs.buffer = brown; bs.loop = true; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; bed = AC.createGain(); bed.gain.value = 0.0; bs.connect(lp); lp.connect(bed); bed.connect(amb); bs.start(); bed.lp = lp;
+  // near traffic: tyre roar, brighter in the rain; wind: gusting low noise, louder up high
+  const ns = AC.createBufferSource(); ns.buffer = noiseB; ns.loop = true; const nb = AC.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 1100; nb.Q.value = 0.45; nearG = AC.createGain(); nearG.gain.value = 0; ns.connect(nb); nb.connect(nearG); nearG.connect(amb); ns.start(0, 0.7); nearG.bp = nb;
+  const ws = AC.createBufferSource(); ws.buffer = brown; ws.loop = true; const wl = AC.createBiquadFilter(); wl.type = 'lowpass'; wl.frequency.value = 520; wl.Q.value = 1.6; const wlfo = AC.createOscillator(); wlfo.frequency.value = 0.11; const wlg = AC.createGain(); wlg.gain.value = 260; wlfo.connect(wlg); wlg.connect(wl.frequency); wlfo.start();
+  windG = AC.createGain(); windG.gain.value = 0; const gust = AC.createGain(); gust.gain.value = 0.6; const glfo = AC.createOscillator(); glfo.frequency.value = 0.07; const glg = AC.createGain(); glg.gain.value = 0.4; glfo.connect(glg); glg.connect(gust.gain); glfo.start(); ws.connect(wl); wl.connect(gust); gust.connect(windG); windG.connect(amb); ws.start(0, 1.3);
+  const rs = AC.createBufferSource(); rs.buffer = noiseB; rs.loop = true; const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400; rainG = AC.createGain(); rainG.gain.value = 0; rs.connect(hp); hp.connect(rainG); rainG.connect(amb); rs.start();
   setTimeout(() => DIR.audioReady(), 0);
   sirenO = AC.createOscillator(); sirenO.type = 'triangle'; sirenO.frequency.value = 700; const sf = AC.createBiquadFilter(); sf.type = 'bandpass'; sf.frequency.value = 1100; sf.Q.value = 0.8; sirenG = AC.createGain(); sirenG.gain.value = 0; sirenO.connect(sf); sf.connect(sirenG); sirenG.connect(master); sirenO.start();
 }
-function tone(t, d, f, f2, type, g, att) { const o = AC.createOscillator(); o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); const a = AC.createGain(); a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + (att || 0.005)); a.gain.exponentialRampToValueAtTime(0.0008, t + d); o.connect(a); a.connect(master); o.start(t); o.stop(t + d + 0.05); }
-function nz(t, d, f, q, type, g, f2) { const s = AC.createBufferSource(); s.buffer = noiseB; const fl = AC.createBiquadFilter(); fl.type = type || 'bandpass'; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + d); fl.Q.value = q || 1; const a = AC.createGain(); a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + 0.004); a.gain.exponentialRampToValueAtTime(0.0008, t + d); s.connect(fl); fl.connect(a); a.connect(master); s.start(t, Math.random()); s.stop(t + d + 0.05); }
+function makeIR(sec) { const n = AC.sampleRate * sec, b = AC.createBuffer(2, n, AC.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < n; i++) { const x = i / n; d[i] = i < AC.sampleRate * 0.02 ? 0 : (Math.random() * 2 - 1) * Math.pow(1 - x, 3.2) * (x < 0.08 ? 0.6 : 1); } } return b; }
+function tone(t, d, f, f2, type, g, att, dst) { const o = AC.createOscillator(); o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); const a = AC.createGain(); a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + (att || 0.005)); a.gain.exponentialRampToValueAtTime(0.0008, t + d); o.connect(a); a.connect(dst || master); o.start(t); o.stop(t + d + 0.05); }
+function nz(t, d, f, q, type, g, f2, dst) { const s = AC.createBufferSource(); s.buffer = noiseB; const fl = AC.createBiquadFilter(); fl.type = type || 'bandpass'; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + d); fl.Q.value = q || 1; const a = AC.createGain(); a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g, t + 0.004); a.gain.exponentialRampToValueAtTime(0.0008, t + d); s.connect(fl); fl.connect(a); a.connect(dst || master); s.start(t, Math.random()); s.stop(t + d + 0.05); }
 function snd(k, pan) {
   if (!AC || muted) return; const t = AC.currentTime;
   if (k === 'ui') tone(t, 0.06, 1400, 1000, 'square', 0.025);
@@ -523,16 +530,33 @@ function snd(k, pan) {
   else if (k === 'radio') { nz(t, 0.08, 2200, 3, 'bandpass', 0.08); tone(t + 0.06, 0.07, 1250, 0, 'sine', 0.06); tone(t + 0.15, 0.07, 1650, 0, 'sine', 0.06); nz(t + 0.24, 0.12, 2200, 3, 'bandpass', 0.05); }
   else if (k === 'clear') { tone(t, 0.18, 660, 0, 'sine', 0.07); tone(t + 0.12, 0.25, 990, 0, 'sine', 0.07); }
   else if (k === 'phone') { for (let i = 0; i < 2; i++) { tone(t + i * 0.22, 0.16, 1700, 0, 'sine', 0.04); tone(t + i * 0.22, 0.16, 2100, 0, 'sine', 0.03); } }
-  else if (k === 'horn') { const f = 380 + Math.random() * 120; tone(t, 0.22 + Math.random() * 0.25, f, 0, 'square', 0.018, 0.01); tone(t, 0.22, f * 1.26, 0, 'square', 0.012, 0.01); }
-  else if (k === 'thunder') { nz(t, 3.2, 180, 0.6, 'lowpass', 0.5, 50); tone(t, 2.2, 45, 28, 'sine', 0.3, 0.05); }
-  else if (k === 'trainhorn') { for (const [d0, len] of [[0, 0.9], [1.05, 0.35], [1.5, 1.1]]) for (const f of [311, 370, 466]) tone(t + d0, len, f, 0, 'sawtooth', 0.011, 0.04); }
-  else if (k === 'xbell') { tone(t, 0.18, 1560, 0, 'triangle', 0.02); tone(t + 0.26, 0.18, 1560, 0, 'triangle', 0.02); }
+  else if (k === 'horn') { const f = 380 + Math.random() * 120; const hp = (Math.random() * 2 - 1) * 0.7, pn = AC.createStereoPanner(); pn.pan.value = hp; pn.connect(amb); tone(t, 0.22 + Math.random() * 0.25, f, 0, 'square', 0.018, 0.01, pn); tone(t, 0.22, f * 1.26, 0, 'square', 0.012, 0.01, pn); }
+  else if (k === 'thunder') { nz(t, 3.2, 180, 0.6, 'lowpass', 0.5, 50, amb); tone(t, 2.2, 45, 28, 'sine', 0.3, 0.05, amb); }
+  else if (k === 'trainhorn') { for (const [d0, len] of [[0, 0.9], [1.05, 0.35], [1.5, 1.1]]) for (const f of [311, 370, 466]) tone(t + d0, len, f, 0, 'sawtooth', 0.011, 0.04, amb); }
+  else if (k === 'xbell') { tone(t, 0.18, 1560, 0, 'triangle', 0.02, 0, amb); tone(t + 0.26, 0.18, 1560, 0, 'triangle', 0.02, 0, amb); }
 }
 let hornT = 0;
+// one-off city sounds, all synthesised: a car going by (tyres + engine, panned across), a bus's air brakes, small birds
+function passby(zk, wet) { const t = AC.currentTime, d = 1.3 + Math.random() * 1.4, s = AC.createBufferSource(); s.buffer = noiseB; const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 0.9; const f0 = wet ? 1900 : 750;
+  f.frequency.setValueAtTime(f0 * 0.7, t); f.frequency.linearRampToValueAtTime(f0 * 1.5, t + d * 0.5); f.frequency.linearRampToValueAtTime(f0 * 0.6, t + d);
+  const g = AC.createGain(), pk = (0.03 + Math.random() * 0.04) * zk * (wet ? 1.4 : 1); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(pk, t + d * 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  const p = AC.createStereoPanner(), dir = Math.random() < 0.5 ? -1 : 1; p.pan.setValueAtTime(-0.85 * dir, t); p.pan.linearRampToValueAtTime(0.85 * dir, t + d); p.connect(amb);
+  s.connect(f); f.connect(g); g.connect(p); s.start(t, Math.random()); s.stop(t + d + 0.05);
+  const o = AC.createOscillator(); o.type = 'sawtooth'; const ef = 48 + Math.random() * 45; o.frequency.setValueAtTime(ef * 1.07, t); o.frequency.linearRampToValueAtTime(ef * 0.93, t + d); const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 230;
+  const og = AC.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(pk * 0.6, t + d * 0.5); og.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(lp); lp.connect(og); og.connect(p); o.start(t); o.stop(t + d + 0.05); }
+function airbrake(zk) { const t = AC.currentTime, p = AC.createStereoPanner(); p.pan.value = (Math.random() * 2 - 1) * 0.8; p.connect(amb); tone(t, 0.12, 85, 60, 'sine', 0.05 * zk, 0, p); nz(t + 0.1, 0.7, 4200, 0.5, 'highpass', 0.035 * zk, 0, p); nz(t + 0.9, 0.35, 3000, 0.6, 'highpass', 0.015 * zk, 0, p); }
+function birds(zk) { const t = AC.currentTime, n = 2 + ((Math.random() * 4) | 0), base = 2600 + Math.random() * 2200, p = AC.createStereoPanner(); p.pan.value = (Math.random() * 2 - 1) * 0.9; p.connect(amb);
+  for (let i = 0; i < n; i++) { const tt = t + i * (0.09 + Math.random() * 0.12), up = Math.random() < 0.5; tone(tt, 0.07 + Math.random() * 0.05, base * (up ? 0.85 : 1.15), base * (up ? 1.2 : 0.8), 'sine', 0.009 * zk, 0.004, p); } }
 function audioFrame(dt, stoppedOnScreen, carsOnScreen, sirenNear) {
   if (!AC || muted) return; const t = AC.currentTime;
   const zoomK = Math.max(0, Math.min(1, 1.6 - Math.log10(Math.max(1, cam.wpp)) * 0.9));
-  bed.gain.setTargetAtTime(Math.min(0.3, 0.04 + carsOnScreen / 2500 * 0.25) * (0.35 + zoomK * 0.65), t, 0.5); bed.lp.frequency.setTargetAtTime(300 + zoomK * 900, t, 0.5);
+  const night = envNight(), wx = (typeof LV !== 'undefined' && LV.feed && LV.feed.weather) || {}, wind = Math.max(0, Math.min(1, ((wx.wind_speed_10m || 10) - 8) / 40)), wetRd = rainOn || snowOn;
+  bed.gain.setTargetAtTime(Math.min(0.3, 0.04 + carsOnScreen / 2500 * 0.25) * (0.35 + zoomK * 0.65) * (1 - night * 0.35), t, 0.5); bed.lp.frequency.setTargetAtTime(300 + zoomK * 900, t, 0.5);
+  nearG.gain.setTargetAtTime(Math.min(0.06, carsOnScreen / 600 * 0.06) * zoomK * zoomK * (wetRd ? 1.5 : 1), t, 0.6); nearG.bp.frequency.setTargetAtTime(wetRd ? 2200 : 1100, t, 1);
+  windG.gain.setTargetAtTime(0.012 * (1 - zoomK) + wind * (0.025 + (1 - zoomK) * 0.07), t, 1.5); // up high there is always a little air; real wind makes it gust
+  pbT -= dt; if (pbT <= 0) { const dens = Math.min(1, carsOnScreen / 300); pbT = (0.6 + Math.random() * 2.4) / Math.max(0.12, dens) * (1 + night); if (zoomK > 0.55 && carsOnScreen > 6) passby(zoomK, wetRd); }
+  abT -= dt; if (abT <= 0) { abT = 14 + Math.random() * 30; if (zoomK > 0.6 && carsOnScreen > 30 && night < 0.7) airbrake(zoomK); }
+  birdT -= dt; if (birdT <= 0) { birdT = 5 + Math.random() * 14; const hr = simT / 3600 % 24; if (zoomK > 0.35 && night < 0.25 && !wetRd && Math.random() < (hr < 10 ? 0.85 : 0.4)) birds(zoomK); }
   rainG.gain.setTargetAtTime(rainOn ? 0.07 : 0, t, 1.0);
   sirenG.gain.setTargetAtTime(sirenNear ? 0.045 * zoomK + 0.01 : 0, t, 0.3); if (sirenNear) { const ph = (t % 2.4) / 2.4; sirenO.frequency.setTargetAtTime(ph < 0.5 ? 1350 : 700, t, 0.35); }
   hornT -= dt; if (hornT <= 0) { hornT = 0.4 + Math.random() * 1.6; if (stoppedOnScreen > 25 && zoomK > 0.45 && Math.random() < Math.min(0.9, stoppedOnScreen / 300)) snd('horn'); }
@@ -609,5 +633,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { get LV() { return LV; }, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { get LV() { return LV; }, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();

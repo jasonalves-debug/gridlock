@@ -168,6 +168,23 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .rep .bad { color: var(--red); } .rep .good { color: var(--green); } .rep .warn { color: #ffb020; }
 @media (max-width: 420px) { .modes { grid-template-columns: 1fr; } }
 /* ---------- TV mode */
+#bcast .kick { display: inline-block; margin-left: 14px; background: #0a0d12; color: #f2f2f0; font: 800 11px var(--f-mono); letter-spacing: .14em; padding: 4px 9px; animation: ltin .45s cubic-bezier(.2,.8,.2,1) backwards; }
+#bcast .kick[hidden] { display: none; } #bcast .lower .lt { display: table; }
+#bcast.brk .kick { background: #d7141a; animation: ltin .45s cubic-bezier(.2,.8,.2,1) backwards, brk 1s steps(2) .5s 4; }
+@keyframes brk { 50% { background: #f2f2f0; color: #d7141a; } }
+#bcast.board .kick, #bcast.board .lt, #bcast.board .ls { display: none !important; }
+#dip { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 9; transition: opacity .28s ease; } #dip.on { opacity: 1; }
+#tvboard { position: fixed; left: 3vw; top: calc(5vh + 54px); width: min(430px, 42vw); z-index: 10; pointer-events: none; background: rgba(8,11,16,.93); border-top: 4px solid #d7141a; box-shadow: 0 20px 60px rgba(0,0,0,.6); padding: 16px 18px 14px; color: #e8edf2;
+  transform: translateX(-115%); opacity: 0; transition: transform .7s cubic-bezier(.2,.8,.2,1), opacity .5s; }
+#tvboard.on { transform: none; opacity: 1; }
+#tvboard .bd-h { display: flex; justify-content: space-between; align-items: baseline; font: 800 13px var(--f-mono); letter-spacing: .12em; } #tvboard .bd-h span { color: #9fb0c0; }
+#tvboard .bd-wx { display: flex; align-items: center; gap: 14px; margin: 12px 0 6px; } #tvboard .bd-wx em { font-style: normal; font-size: 54px; font-weight: 800; font-stretch: 80%; line-height: 1; }
+#tvboard .bd-wx b { display: block; font-size: 18px; } #tvboard .bd-wx span { color: #9fb0c0; font-size: 13px; }
+#tvboard .bd-sec { margin-top: 12px; } #tvboard .bd-sec > b { display: block; font: 700 11px var(--f-mono); letter-spacing: .12em; color: #9fb0c0; margin-bottom: 6px; } #tvboard .bd-sec p { margin: 0; font-size: 14px; }
+#tvboard .bd-row { display: grid; grid-template-columns: 130px 1fr 44px; gap: 8px; align-items: center; font-size: 13.5px; margin: 4px 0; } #tvboard .bd-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } #tvboard .bd-row > b { text-align: right; font-family: var(--f-mono); }
+#tvboard .bd-bar { height: 10px; background: rgba(255,255,255,.08); } #tvboard .bd-bar i { display: block; height: 100%; width: 0; background: var(--c); transition: width .9s cubic-bezier(.2,.8,.2,1) var(--d, .3s); } #tvboard.on .bd-bar i { width: var(--w); }
+#tvboard .bd-foot { display: flex; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); font-size: 12.5px; color: #9fb0c0; } #tvboard .bd-foot b { color: #fff; font-family: var(--f-mono); }
+
 .mode.tvtile { grid-column: 1 / -1; } .mode.tvtile .tag { color: #ff6b6b; } .mode.tvtile.first { border-color: #ff6b6b; box-shadow: 0 0 0 1px #ff6b6b, 0 0 24px rgba(255,107,107,.25); }
 .vig { position: fixed; inset: 0; pointer-events: none; z-index: 8; opacity: 0; transition: opacity .8s; background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.6) 100%); } body.tv .vig, body.cine .vig { opacity: 1; }
 #tvbar { position: fixed; left: 0; right: 0; bottom: 5vh; height: 36px; z-index: 11; display: none; background: rgba(6,9,13,.95); border-top: 2px solid #d7141a; }
@@ -242,13 +259,15 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
 <div id="areabar" hidden></div>
 <div id="sheet" hidden></div>
 <div class="vig" aria-hidden="true"></div>
+<div id="dip" aria-hidden="true"></div>
+<div id="tvboard" aria-hidden="true"></div>
 <div id="tvbar" aria-hidden="true"><b class="tag">EASTWIRE</b><span class="clk" id="tvClk"></span><div class="crawl"><span id="tvCrawl"></span></div></div>
 <button type="button" id="tvExit">Exit TV mode (T)</button>
 <div id="bars" aria-hidden="true"><i class="top"></i><i class="bot"></i></div>
 <div id="bcast" hidden>
   <div class="pip" id="bcPip" hidden><img id="bcPipImg" alt="Traffic camera"><span id="bcPipTag"></span></div>
   <div class="bug"><b><i></i>LIVE</b><span>EASTWIRE</span><em id="bcClock">7:42</em></div>
-  <div class="lower"><div class="lt" id="bcTitle">401 CLOSED</div><div class="ls" id="bcSub">OPP on scene</div><div class="tick"><span class="tag">EASTWIRE</span><div class="crawl"><span id="bcCrawl"></span></div></div></div>
+  <div class="lower"><div class="kick" id="bcKick" hidden></div><div class="lt" id="bcTitle">401 CLOSED</div><div class="ls" id="bcSub">OPP on scene</div><div class="tick"><span class="tag">EASTWIRE</span><div class="crawl"><span id="bcCrawl"></span></div></div></div>
   <button type="button" class="back" id="bcBack">Back to ops ✕</button>
 </div>
 
