@@ -257,9 +257,10 @@ const DIR = (function () {
     }
   }
   function frame(dt) { stepHelis(dt); stepShot(dt); rotorFrame(); musicTick(); const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
+  function hold(ms) { if (shot) endShot(true); shotQ = []; lastUser = performance.now() + ms; } // pause the auto camera, e.g. after the viewer picks their own area
   function userInput() { lastUser = performance.now(); if (shot) endShot(true); }
   $('bcBack').onclick = () => endShot(true);
   $('camBtn').setAttribute('aria-pressed', String(autoCam));
   $('camBtn').onclick = () => { autoCam = !autoCam; store.set('autocam', autoCam); $('camBtn').setAttribute('aria-pressed', String(autoCam)); if (!autoCam) { endShot(true); } toast('CAMERA', autoCam ? 'Director camera on. It will cut to big moments.' : 'Director camera off.', 'var(--cyan)'); };
-  return { onEvent, onSlow, frame, heliSprites, userInput, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
+  return { onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
 })();

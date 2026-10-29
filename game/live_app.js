@@ -51,6 +51,7 @@ function worldInitFor(m, kind) { // m: shift | watch | whatif (live and replay r
 function replayStart(epoch0) { const now = Date.now() / 1000; const calls = (LV.feed && LV.feed.calls) || []; const first = calls.length ? Math.min(...calls.map(c => c.ts)) : now - 86400; return Math.max(now - 86400, first - 900) - epoch0; }
 async function liveAfterReady() { // real calls go in once the player is watching, so each one is seen arriving
   if (!LV.feed) return;
+  setTimeout(areaAfterReady, 1200);
   if (LV.kind) {
     const r = await cmd('liveFeed', { live: { calls: LV.feed.calls, hwy: LV.feed.hwy } }, { calls: true, buses: false });
     const spots = LV.ws ? LV.ws.spots.length : 0;
@@ -206,6 +207,7 @@ function badge(c, x, y, icon, col, r, glow) {
 }
 const inView = p => p && p[0] > -30 && p[0] < innerWidth + 30 && p[1] > 40 && p[1] < innerHeight + 30;
 function liveOverlay(c) {
+  areaRing(c);
   const hits = LV.hits; hits.length = 0; if (!LV.ws) return; const ws = LV.ws, wl = LV.wl, wpp = cam.wpp, t = performance.now() / 1000;
   const hit = (sel, p) => hits.push({ sel, x: p[0], y: p[1] });
   // TTC subway shuttles: dashed route + chip
@@ -412,4 +414,58 @@ function liveSourcesHtml() {
     + `<div class="rep" style="font-size:13px">${SOURCES.map(row).join('')}<span>TTC live bus GPS</span><b class="${RB.at && Date.now() - RB.at < 120000 ? 'good' : RB.err ? 'bad' : ''}">${RB.at && Date.now() - RB.at < 120000 ? '✓ ' + RB.n : RB.err ? 'unavailable' : LV.kind === 'live' ? '—' : 'Live mode only'}</b></div>`
     + body(`Cars are simulated. What happens to them is real: calls, roadwork, digs, 311 reports, TTC alerts and weather are collected every 5 minutes and checked here every 2 minutes; bus GPS every 20 seconds; camera photos every minute. Timetables, cameras, schools, towers, building sites and the census are refreshed daily.${LV.err ? `<br><span style="color:var(--muted)">Last fetch problem: ${esc(LV.err)}</span>` : ''}`);
 }
+// ---------------- My area: type the first three characters of a postal code. The camera flies there, a ring marks the area,
+// and a panel counts what is going on inside it right now. Remembered between visits.
+const AREA = { fsa: store.get('myfsa', null), g: null, open: false, edit: false, msg: '' };
+function areaGeom(code) { // centre and radius (map metres) from the FSA's sample points; the median ignores strays
+  const pts = (LV.stat && LV.stat.fsa && LV.stat.fsa[code]) || []; if (pts.length < 3) return null; const P = G.proj;
+  const xs = pts.map(p => (p[1] - P.lon0) * P.kx), ys = pts.map(p => -(p[0] - P.lat0) * P.ky), med = a => a.slice().sort((p, q) => p - q)[a.length >> 1];
+  const x = med(xs), y = med(ys), d = xs.map((v, i) => Math.hypot(v - x, ys[i] - y)).sort((p, q) => p - q);
+  return { x, y, r: Math.min(2400, Math.max(700, d[Math.floor(d.length * 0.8)])) };
+}
+function areaCodes() { return Object.keys((LV.stat && LV.stat.fsa) || {}).sort(); }
+function areaSet(raw, fly = true) {
+  const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+  if (code.length < 3) { AREA.msg = 'Enter the first 3 characters, like M1K.'; areaBar(); return false; }
+  const g = areaGeom(code);
+  if (!g) { AREA.msg = `${code} isn't in the Scarborough map. Try: ${areaCodes().join(' ')}`; areaBar(); return false; }
+  AREA.fsa = code; AREA.g = g; AREA.edit = false; AREA.msg = ''; store.set('myfsa', code); areaBar();
+  if (fly) { DIR.hold(90000); flyTo(g.x, g.y, Math.min(4400, Math.max(1700, g.r * 3))); }
+  return true;
+}
+function areaStats() {
+  const g = AREA.g, r2 = g.r * g.r, P = G.proj, now = Date.now() / 1000, within = (x, y) => (x - g.x) ** 2 + (y - g.y) ** 2 <= r2;
+  const calls = ((LV.feed && LV.feed.calls) || []).filter(c => now - c.ts < 86400 && within((c.lng - P.lon0) * P.kx, -(c.lat - P.lat0) * P.ky));
+  const n = f => calls.filter(f).length, hour = calls.filter(c => now - c.ts < 3600).length;
+  const live = incidents.filter(i => i.state !== 'cleared' && within(i.x, i.y)), hwy = live.filter(i => i.type === 'hwy').length;
+  const zones = (LV.zones || []).filter(z => z.on && within(z.x, z.y)).length;
+  const cs = cams().map((c, i) => ({ i, c })).filter(o => within(o.c.x, o.c.y)).sort((a, b) => Math.hypot(a.c.x - g.x, a.c.y - g.y) - Math.hypot(b.c.x - g.x, b.c.y - g.y));
+  const enfN = enf().filter(c => within(c.x, c.y)).length;
+  return { total: calls.length, hour, pol: n(c => c.src === 'tps'), fire: n(c => c.src !== 'tps' && c.act !== 'medical'), med: n(c => c.src !== 'tps' && c.act === 'medical'), onScene: live.filter(i => i.type === 'call').length, hwy, zones, cams: cs, enfN };
+}
+function areaBar() {
+  const el = $('areabar'); if (!el) return; const b = $('areaBtn'); if (b) b.setAttribute('aria-pressed', String(AREA.open));
+  if (!AREA.open) { el.hidden = true; return; } el.hidden = false;
+  if (AREA.edit || !AREA.g) {
+    el.innerHTML = `<b>My area</b><form id="areaForm"><input id="areaIn" maxlength="3" size="4" placeholder="M1K" autocomplete="postal-code" autocapitalize="characters" spellcheck="false" aria-label="First 3 characters of your postal code" value="${AREA.fsa || ''}"><button type="submit">Go</button><button type="button" data-area="close" aria-label="Close">×</button></form><span>${esc(AREA.msg) || 'First 3 characters of your postal code.'}</span>`;
+    const inp = $('areaIn'); inp.addEventListener('keydown', e => e.stopPropagation()); setTimeout(() => inp.focus(), 30);
+    $('areaForm').onsubmit = e => { e.preventDefault(); areaSet(inp.value); }; return;
+  }
+  const s = areaStats(), line = (v, t) => `<div><em>${v}</em><span>${t}</span></div>`;
+  el.innerHTML = `<b>${AREA.fsa} · near you</b><div class="areagrid">${line(s.onScene, 'calls on scene now')}${line(s.total, 'calls in 24 h')}${line(s.pol + ' / ' + s.fire + ' / ' + s.med, 'police / fire / medical')}${line(s.zones, 'work zones active')}${line(s.hwy, 'highway incidents')}${line(s.cams.length + s.enfN, 'cameras (' + s.cams.length + ' view, ' + s.enfN + ' enforcement)')}</div>`
+    + `<div class="areaact">${s.cams.length ? `<button type="button" data-cam="${s.cams[0].i}">Nearest camera</button>` : ''}<button type="button" data-area="edit">Change</button><button type="button" data-area="close" aria-label="Close">×</button></div>`;
+}
+function areaRing(c) {
+  if (!AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
+  const rx = Math.hypot(q[0] - p[0], q[1] - p[1]), ry = Math.hypot(q2[0] - p[0], q2[1] - p[1]); if (rx < 30) return; // too far out: the ring would be a speck
+  c.save(); c.setLineDash([8, 8]); c.lineDashOffset = -performance.now() / 80; c.strokeStyle = 'rgba(82,199,255,.8)'; c.fillStyle = 'rgba(82,199,255,.05)'; c.lineWidth = 2;
+  c.beginPath(); c.ellipse(p[0], p[1], rx, ry, 0, 0, 7); c.fill(); c.stroke(); c.restore();
+  c.font = `800 13px ${getMono()}`; c.textAlign = 'center'; c.fillStyle = 'rgba(8,12,17,.85)'; roundRect(c, p[0] - 26, p[1] - ry - 24, 52, 20, 6); c.fill(); c.fillStyle = '#52c7ff'; c.fillText(AREA.fsa, p[0], p[1] - ry - 10);
+}
+document.addEventListener('click', e => {
+  if (e.target.closest && e.target.closest('#areaBtn')) { AREA.open = !AREA.open; AREA.edit = !AREA.g; areaBar(); return; }
+  const b = e.target.closest && e.target.closest('[data-area]'); if (!b) return;
+  if (b.dataset.area === 'close') { AREA.open = false; areaBar(); } else if (b.dataset.area === 'edit') { AREA.edit = true; areaBar(); } });
+setInterval(() => { if (AREA.open && !AREA.edit && AREA.g) areaBar(); }, 20000);
+function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; if (areaSet(AREA.fsa, true)) toast('MY AREA', `Showing ${AREA.fsa}. Tap the pin to change it.`, 'var(--cyan)'); }
 loadFeed(true);

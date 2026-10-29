@@ -81,6 +81,13 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 #tools { position: fixed; right: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); z-index: 5; display: flex; gap: 6px; align-items: flex-end; pointer-events: none; }
 .rail { display: flex; flex-direction: column; gap: 5px; pointer-events: auto; }
 #h24bar { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); z-index: 5; display: flex; flex-direction: column; gap: 5px; align-items: flex-start; font-size: 12px; }
+#areabar { position: fixed; left: 8px; top: calc(env(safe-area-inset-top, 0px) + 84px); z-index: 6; max-width: min(340px, calc(100vw - 80px)); padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(8,12,17,.86); backdrop-filter: blur(8px); font-size: 12px; display: flex; flex-direction: column; gap: 8px; }
+#areabar > b { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #52c7ff; }
+#areabar form { display: flex; gap: 6px; } #areabar input { width: 64px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: #0b1118; color: var(--text); font: 700 16px var(--f-mono); text-transform: uppercase; text-align: center; letter-spacing: .1em; }
+#areabar button { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); font: inherit; cursor: pointer; }
+#areabar > span { color: var(--muted); }
+.areagrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; } .areagrid div { display: flex; flex-direction: column; } .areagrid em { font: 700 17px var(--f-mono); font-style: normal; } .areagrid span { color: var(--muted); font-size: 11px; line-height: 1.25; }
+.areaact { display: flex; gap: 6px; flex-wrap: wrap; }
 #h24bar b { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding-left: 2px; }
 #h24bar button { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(8,12,17,.78); color: var(--text); font: inherit; cursor: pointer; }
 #h24bar button i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
@@ -164,7 +171,7 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 #bars i { position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 9; transition: height .6s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
 #bars .top { top: 0; } #bars .bot { bottom: 0; }
 body.cine #bars i { height: 5vh; }
-body.cine #hud, body.cine #feed, body.cine #tools { opacity: 0; pointer-events: none !important; transition: opacity .4s; }
+body.cine #hud, body.cine #feed, body.cine #tools, body.cine #areabar, body.cine #h24bar { opacity: 0; pointer-events: none !important; transition: opacity .4s; }
 #hud, #feed, #tools { transition: opacity .4s; }
 body.cine #ticker { top: calc(5vh + 34px) !important; }
 #bcast { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
@@ -213,9 +220,10 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
 <div id="hint" hidden></div>
 <div id="tools" hidden>
   <div class="rail" id="causeRow" hidden></div>
-  <div class="rail" id="toolRow"><button type="button" class="tool" id="h24Btn" hidden aria-pressed="false" aria-label="Calls in the last 24 hours" title="Every real call in the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="camBtn" aria-label="Director camera" title="Director camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/></svg></button><button type="button" class="tool" id="muteBtn" aria-label="Sound" title="Sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="muteWave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button></div>
+  <div class="rail" id="toolRow"><button type="button" class="tool" id="areaBtn" hidden aria-pressed="false" aria-label="My area (postal code)" title="My area: enter the first 3 characters of your postal code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></button><button type="button" class="tool" id="h24Btn" hidden aria-pressed="false" aria-label="Calls in the last 24 hours" title="Every real call in the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="camBtn" aria-label="Director camera" title="Director camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/></svg></button><button type="button" class="tool" id="muteBtn" aria-label="Sound" title="Sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="muteWave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button></div>
 </div>
 <div id="h24bar" hidden></div>
+<div id="areabar" hidden></div>
 <div id="sheet" hidden></div>
 <div id="bars" aria-hidden="true"><i class="top"></i><i class="bot"></i></div>
 <div id="bcast" hidden>
