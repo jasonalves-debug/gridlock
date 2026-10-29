@@ -498,7 +498,7 @@ function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcT
 let FONT = null, MONO = null; function getFont() { return FONT || (FONT = getComputedStyle(document.documentElement).getPropertyValue('--f-display')); } function getMono() { return MONO || (MONO = getComputedStyle(document.documentElement).getPropertyValue('--f-mono')); }
 
 // ---------------------------------------------------------------- audio
-let AC = null, master = null, amb = null, nearG = null, windG = null, pbT = 1, abT = 15, birdT = 4, bed = null, rainG = null, sirenG = null, sirenO = null, noiseB = null, muted = store.get('muted', false);
+let liftV = 0, AC = null, master = null, amb = null, nearG = null, windG = null, pbT = 1, abT = 15, birdT = 4, bed = null, rainG = null, sirenG = null, sirenO = null, noiseB = null, muted = store.get('muted', false);
 function audioInit() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
   try { AC = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 0.1 }); } catch (e) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e2) { return; } }
@@ -625,7 +625,8 @@ function frame(now) {
   const spr = buildSprites(dt);
   const night = envNight();
   const outages = incidents.filter(i => i.type === 'power' && i.state !== 'cleared').map(i => [i.x, i.y, i.r]);
-  R.draw({ time: now / 1000, night, day: 1 - night, dusk: envDusk(), rain: rainOn && !snowOn ? 1 : 0, snow: snowOn ? 1 : 0, fog: fogOn ? 1 : 0, flash, outages, overlay: overlayOn ? Math.max(0.1, Math.min(1, (cam.wpp - 0.5) / 2.5)) : 0, sigA: Math.max(0, Math.min(1, (3.2 - cam.wpp) / 2)), spriteAlphaN: spr.aN, addN: spr.addN, smokeStart: spr.smokeStart, smokeN: spr.smokeN });
+  liftV += (((typeof TV !== 'undefined' && TV.on) ? 1 : 0) - liftV) * Math.min(1, dt * 1.5);
+  R.draw({ lift: liftV, time: now / 1000, night, day: 1 - night, dusk: envDusk(), rain: rainOn && !snowOn ? 1 : 0, snow: snowOn ? 1 : 0, fog: fogOn ? 1 : 0, flash, outages, overlay: overlayOn ? Math.max(0.1, Math.min(1, (cam.wpp - 0.5) / 2.5)) : 0, sigA: Math.max(0, Math.min(1, (3.2 - cam.wpp) / 2)), spriteAlphaN: spr.aN, addN: spr.addN, smokeStart: spr.smokeStart, smokeN: spr.smokeN });
   drawOverlay();
   if (ready) requestFrame();
   statT -= dt; if (statT <= 0 && ready) { statT = 0.5; let cars = 0, stopped = 0, siren = false; const x0 = 0, x1 = innerWidth, y0 = 0, y1 = innerHeight; for (let i = 0; i < frameN; i += 3) { const f = posBuf[i * 4 + 3]; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (!p || p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1) continue; cars += 3; if (((f | 0) >> 3) & 1) stopped += 3; } for (let i = Math.max(0, frameN - 90); i < frameN; i++) { const f = posBuf[i * 4 + 3] | 0; if (!((f >> 14) & 1) || ((f >> 13) & 1) || ((f >> 23) & 1)) continue; const ty = f & 7; if (ty !== 2 && ty !== 3 && ty !== 7) continue; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (p && p[0] > -100 && p[0] < innerWidth + 100 && p[1] > -100 && p[1] < innerHeight + 100) siren = true; } onScreen = { cars, stopped, siren }; }

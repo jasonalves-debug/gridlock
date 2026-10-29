@@ -282,11 +282,13 @@ function buildPrograms() {
   const QV = `layout(location=0) in vec2 aQ; out vec2 vU; void main(){ vU = aQ * 0.5 + 0.5; gl_Position = vec4(aQ, 0.0, 1.0); }`;
   P.bright = prog(QV, `in vec2 vU; uniform sampler2D uT; uniform float uThr; out vec4 o; void main(){ vec3 c = texture(uT, vU).rgb; float l = max(c.r, max(c.g, c.b)); o = vec4(c * smoothstep(uThr, uThr + 0.6, l), 1.0); }`);
   P.blur = prog(QV, `in vec2 vU; uniform sampler2D uT; uniform vec2 uD; out vec4 o; void main(){ vec3 c = texture(uT, vU).rgb * 0.227; c += (texture(uT, vU + uD * 1.385).rgb + texture(uT, vU - uD * 1.385).rgb) * 0.316; c += (texture(uT, vU + uD * 3.23).rgb + texture(uT, vU - uD * 3.23).rgb) * 0.07; o = vec4(c, 1.0); }`);
-  P.comp = prog(QV, `in vec2 vU; uniform sampler2D uT; uniform sampler2D uB1; uniform sampler2D uB2; uniform sampler2D uB3; uniform float uTime; uniform float uRain; uniform float uFlash; uniform float uNight; uniform float uDay; uniform vec2 uRes; uniform float uDusk; uniform float uSnow; uniform float uFog; out vec4 o;
+  P.comp = prog(QV, `in vec2 vU; uniform sampler2D uT; uniform sampler2D uB1; uniform sampler2D uB2; uniform sampler2D uB3; uniform float uTime; uniform float uRain; uniform float uFlash; uniform float uNight; uniform float uDay; uniform vec2 uRes; uniform float uDusk; uniform float uSnow; uniform float uFog; uniform float uLift; out vec4 o;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     void main(){ vec3 c = texture(uT, vU).rgb; vec3 b = texture(uB1, vU).rgb * 0.6 + texture(uB2, vU).rgb * 0.8 + texture(uB3, vU).rgb * 1.1; c += b * (0.28 + uNight * 0.32);
       // grade: dawn warmth, night blue shadows
       vec3 tint = mix(vec3(0.92, 0.97, 1.12), vec3(1.0), uDay); tint = mix(tint, vec3(1.12, 0.95, 0.86), uDusk); c *= tint;
+      // TV exposure: lift the shadows so a night or a dark ground never reads as a black screen
+      if (uLift > 0.0) { c = pow(max(c, vec3(0.0)), vec3(1.0 - 0.3 * uLift)) * (1.0 + 0.35 * uLift) + vec3(0.012, 0.016, 0.024) * uLift; }
       // rain streaks
       if (uRain > 0.0) { vec2 p = vU * uRes / vec2(3.0, 34.0); p.y += uTime * 26.0; p.x += p.y * 0.12; vec2 id = floor(p); float r = hash(id); float s = step(0.965, r) * smoothstep(0.0, 0.4, fract(p.y)) * smoothstep(1.0, 0.6, fract(p.y)) * smoothstep(0.5, 0.0, abs(fract(p.x) - 0.5)); c += vec3(0.5, 0.6, 0.7) * s * 0.18 * uRain; c = mix(c, c * vec3(0.85, 0.9, 1.0), uRain * 0.3); }
       if (uSnow > 0.0) { for (int L = 0; L < 2; L++) { float sc = L == 0 ? 9.0 : 15.0; vec2 p = vU * uRes / sc; p.y += uTime * (L == 0 ? 2.2 : 1.3); p.x += sin(uTime * 0.7 + p.y * 0.35) * 0.6; vec2 id = floor(p); float r = hash(id + float(L) * 7.0); vec2 f = fract(p) - vec2(0.25 + 0.5 * hash(id + 3.1), 0.25 + 0.5 * r); float flake = step(0.82, r) * smoothstep(0.16, 0.0, length(f)); c += vec3(0.9, 0.93, 1.0) * flake * 0.55 * uSnow; } c = mix(c, c * 0.85 + vec3(0.05, 0.055, 0.065), uSnow * 0.5); }
@@ -494,7 +496,7 @@ function draw(env) {
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bTex[0]); gl.uniform1i(pc.u.uB1, 1);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bTex[1]); gl.uniform1i(pc.u.uB2, 2);
   gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, bTex[2]); gl.uniform1i(pc.u.uB3, 3);
-  gl.uniform1f(pc.u.uTime, env.time); gl.uniform1f(pc.u.uRain, env.rain); if (pc.u.uSnow) gl.uniform1f(pc.u.uSnow, env.snow || 0); if (pc.u.uFog) gl.uniform1f(pc.u.uFog, env.fog || 0); gl.uniform1f(pc.u.uFlash, env.flash || 0); gl.uniform1f(pc.u.uNight, env.night); gl.uniform1f(pc.u.uDay, env.day); gl.uniform1f(pc.u.uDusk, env.dusk || 0); gl.uniform2f(pc.u.uRes, fw, fh);
+  gl.uniform1f(pc.u.uTime, env.time); gl.uniform1f(pc.u.uRain, env.rain); if (pc.u.uSnow) gl.uniform1f(pc.u.uSnow, env.snow || 0); if (pc.u.uFog) gl.uniform1f(pc.u.uFog, env.fog || 0); gl.uniform1f(pc.u.uFlash, env.flash || 0); gl.uniform1f(pc.u.uNight, env.night); if (pc.u.uLift) gl.uniform1f(pc.u.uLift, env.lift || 0); gl.uniform1f(pc.u.uDay, env.day); gl.uniform1f(pc.u.uDusk, env.dusk || 0); gl.uniform2f(pc.u.uRes, fw, fh);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.activeTexture(gl.TEXTURE0);
 }

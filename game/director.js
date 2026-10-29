@@ -45,14 +45,14 @@ const DIR = (function () {
     'u:copy': 'Copy, en route.', 'u:onscene': 'On scene.', 'u:tow': 'On scene, we will need a tow.', 'u:fireon': 'Fire on scene. Knocking it down.', 'u:fireout': 'Fire is out.', 'u:transport': 'Medics transporting to hospital.', 'u:stuck': 'We are stuck in traffic. Nothing is moving.', 'u:closing': 'Setting up a closure. Diverting traffic.', 'u:opp': 'OPP on scene. Highway is shut down.', 'u:gotit': 'Copy. We have got it.', 'u:controlling': 'Directing traffic at the intersection.', 'u:crewdone': 'Crew is done. Clearing the scene.',
     'a:open': 'This is Eastwire News, breaking in Scarborough.', 'a:401': 'We are following breaking news on the 401.', 'a:chopper': 'Our chopper is over the scene right now.', 'a:backed': 'Traffic is backed up for kilometres.', 'a:avoid': 'Police are asking drivers to avoid the area.', 'a:crews': 'Emergency crews are on scene.', 'a:fire': 'Firefighters are battling a vehicle fire.', 'a:hwyboth': 'The highway is closed in both directions.', 'a:sidestreets': 'Drivers are pouring onto side streets.', 'a:residents': 'Residents say they have had enough of cut-through traffic.', 'a:dark': 'Traffic signals are dark across the neighbourhood.', 'a:water': 'A water main break has torn up the road.', 'a:investigation': 'Police have shut down an intersection for an investigation.', 'a:patient': 'Paramedics are rushing a patient to hospital.', 'a:reopen': 'Lanes are reopening, but expect delays.', 'a:stay': 'Stay with Eastwire for updates.', 'a:collision': 'A serious collision is snarling traffic.', 'a:storm': 'A thunderstorm is lashing the east end.', 'a:standstill': 'Scarborough is at a standstill this morning.', 'a:blocked': 'Frustrated residents have blocked their own street.' };
   function captionText(keys) { return keys.map(k => k.startsWith('r:') ? k.slice(2) : CAPTION[k] || (VOICE.cap && VOICE.cap[k]) || (k.startsWith('l:') ? k.slice(2) + ',' : k.startsWith('p:') ? k.slice(2) + ',' : '')).join(' ').replace(/ ,/g, ',').replace(/\s+/g, ' ').trim().replace(/(^|[.?!]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase()); }
-  const lastVar = new Map();
+  const lastVar = new Map(), lastSaid = new Map(), kindSaid = new Map();
   function pickVar(k) { // a line recorded more than once (key, key~2, key~3...) gets a different take each time
     if (!k || !VOICE.clips[k + '~2']) return k; const opts = [k]; for (let i = 2; VOICE.clips[k + '~' + i]; i++) opts.push(k + '~' + i);
     const prev = lastVar.get(k); let c; do { c = opts[(Math.random() * opts.length) | 0]; } while (c === prev); lastVar.set(k, c); return c; }
   const has = k => !!VOICE.clips[k];
   const voDur = keys => keys.reduce((s, k) => s + ((VOICE.dur && VOICE.dur[k]) || 0.8) + 0.05, 0);
   function say(chain, keys, pri, src) {
-    pri = pri == null ? 1 : pri;
+    pri = pri == null ? 1 : pri; const sig = chain + keys.join('|'), nowS = performance.now(); if (pri < 3 && chain !== 'chatter' && nowS - (lastSaid.get(sig) || -1e9) < 75000) return; lastSaid.set(sig, nowS); // the same line is never repeated within 75 s
     keys = keys.filter(k => k && (VOICE.clips[k] || k.startsWith('r:') === false)).map(pickVar); if (!keys.length) return;
     if (speechQ.length > 5) { const i = speechQ.findIndex(q => q.pri < pri); if (i >= 0) speechQ.splice(i, 1); else return; }
     speechQ.push({ t: performance.now(), chain, keys, pri, src: src || (chain === 'anchor' ? 'EASTWIRE' : chain === 'traffic' ? 'EASTWIRE TRAFFIC' : 'DISPATCH') }); speechQ.sort((a, b) => b.pri - a.pri); pump();
@@ -181,10 +181,14 @@ const DIR = (function () {
     else if (shot.type === 'chopper') { const h = helis.find(q => q.id === shot.heli); if (h) { const mx = h.tx * 0.7 + h.x * 0.3, my = h.ty * 0.7 + h.y * 0.3; tx = mx; ty = my; tyaw = followYaw(Math.atan2(h.ty - h.y, h.tx - h.x)); } th = 360; tp = 1.0; }
     else { tyaw = shot.yaw + shot.t * (shot.spin || 0.1); if (shot.x1 != null) { const f = Math.min(1, shot.t / (shot.dur || 9)), e = f * f * (3 - 2 * f); tx = shot.x + (shot.x1 - shot.x) * e; ty = shot.y + (shot.y1 - shot.y) * e; } if (shot.track) { let sx = shot.x, sy = shot.y, n = 1; for (const u of units) if (u.inc === shot.track && u.state === 'onscene' && Math.hypot(u.x - shot.x, u.y - shot.y) < 700) { sx += u.x; sy += u.y; n++; } tx = sx / n; ty = sy / n; } }
     if (shot.type === 'wide') { th = 6500; tp = 0.8; }
+    if (shot.move) { const f = Math.min(1, shot.t / (shot.dur || 9)), e = f * f * (3 - 2 * f), h0 = shot.h || 420; // camera moves: push-in, crane-up reveal, fly along the road
+      if (shot.move === 'push') th = h0 * (1.9 - 0.9 * e); else if (shot.move === 'crane') { th = h0 * (1 + 0.9 * e); tp = Math.max(0.5, (shot.pitch || 0.9) - 0.28 * e); }
+      else if (shot.move === 'fly') tyaw = followYaw(Math.atan2(shot.y1 - shot.y, shot.x1 - shot.x)); }
+    if (shot.tour) { const m = 250; tx = Math.max(bbox[0] + m, Math.min(bbox[2] - m, tx)); ty = Math.max(bbox[1] + m, Math.min(bbox[3] - m, ty)); } // never frame the void past the map edge
     cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.h *= Math.pow(th / cam.h, k); cam.pitch += (tp - cam.pitch) * k; tiltGoal = cam.pitch;
     let dy = tyaw - (cam.yaw || 0); while (dy > Math.PI) dy -= 6.283; while (dy < -Math.PI) dy += 6.283; cam.yaw = (cam.yaw || 0) + dy * Math.min(1, dt * (shot.type === 'follow' ? 2.2 : 1.2));
     $('bcClock').textContent = clock(simT, true);
-    if (shot.t > (shot.dur || 9)) { const next = shot.then; if (tv && shot.tour && !next) { shot = null; return; } endShot(false); if (next) { lastShotEnd = -1e9; startShot(next); } }
+    if (shot.t > (shot.dur || 9)) { const next = shot.then; if (tv && shot.tour) { shot = null; if (next) startShot(Object.assign({ tour: true, pri: 0 }, next)); return; } endShot(false); if (next) { lastShotEnd = -1e9; startShot(next); } }
   }
   // ---------------------------------------------------------------- music (tension bed)
   let mNext = 0, mStep = 0; const BPM = 96, S16 = 60 / BPM / 4;
@@ -262,7 +266,7 @@ const DIR = (function () {
         break; }
       case 'respDispatched': if (e.first && i && bigInc(i)) { say('radio', ['u:copy'], 2, e.kind === 'opp' ? 'OPP' : e.kind === 'fire' ? 'FIRE' : e.kind === 'ems' ? 'EMS' : 'POLICE');
           if (i.type === 'hwy' || (i.type === 'collision' && i.sev >= 1)) requestShot({ type: 'follow', unit: e.unit, inc: i.id, dur: i.type === 'hwy' ? 14 : 7, pri: i.type === 'hwy' ? 3 : 2, title: `${e.kind === 'opp' ? 'OPP' : e.kind === 'fire' ? 'FIRE' : 'POLICE'} RESPONDING`, sub: i.name }); }
-        if (e.kind === 'fire' && i && !broadcastSeen.has('fd' + i.id) && broadcastSeen.add('fd' + i.id)) say('radio', ['d:fire', 'd:code3', i.type === 'hwy' ? 'd:rollover' : 'd:vfire'], 1);
+        if (e.kind === 'fire' && i && !(i.real && i.type === 'hwy') && !broadcastSeen.has('fd' + i.id) && broadcastSeen.add('fd' + i.id)) say('radio', ['d:fire', 'd:code3', i.type === 'hwy' ? 'd:rollover' : 'd:vfire'], 1);
         break;
       case 'respOnScene': if (!i) break; if (shot && shot.type === 'follow' && shot.unit === e.unit) shot.dur = Math.min(shot.dur, shot.t + 2); shotQ = shotQ.filter(q => !(q.type === 'follow' && q.unit === e.unit)); { const src = e.kind === 'opp' ? 'OPP' : e.kind === 'fire' ? 'FIRE' : e.kind === 'ems' ? 'EMS' : 'POLICE';
         if (e.kind === 'opp' && !broadcastSeen.has('oppOn' + i.id)) { broadcastSeen.add('oppOn' + i.id); say('radio', ['u:opp'], 2, src); }
@@ -271,8 +275,8 @@ const DIR = (function () {
         break;
       case 'fireOut': say('radio', ['u:fireout'], 1, 'FIRE'); break;
       case 'transport': say('radio', ['u:transport'], 1, 'EMS'); break;
-      case 'dispatched': say('radio', [e.kind === 'tow' ? 'd:tow' : e.kind === 'hydro' ? 'd:hydro' : 'd:wcrew'], 1); break;
-      case 'arrived': say('radio', ['u:gotit'], 1, e.kind === 'tow' ? 'TOW' : e.kind === 'hydro' ? 'HYDRO' : 'WATER'); break;
+      case 'dispatched': { const nowK = performance.now(); if (nowK - (kindSaid.get('d' + e.kind) || -1e9) < 240000) break; kindSaid.set('d' + e.kind, nowK); } say('radio', [e.kind === 'tow' ? 'd:tow' : e.kind === 'hydro' ? 'd:hydro' : 'd:wcrew'], 1); break;
+      case 'arrived': { const nowK = performance.now(); if (nowK - (kindSaid.get('a' + e.kind) || -1e9) < 180000) break; kindSaid.set('a' + e.kind, nowK); } say('radio', ['u:gotit'], 1, e.kind === 'tow' ? 'TOW' : e.kind === 'hydro' ? 'HYDRO' : 'WATER'); break;
       case 'policeOn': say('radio', ['u:controlling'], 1, 'POLICE'); break;
       case 'cleared': if (e.why === 'reset' || !i || i.type === 'roadclosed') break; say('radio', ['d:clear'], 1);
         if (bigInc(i)) { headline(`${incTitle(i)[0].split(' · ')[0]} CLEARED`); if (broadcastSeen.has('hwy' + i.id) || broadcastSeen.has('col' + i.id) || broadcastSeen.has('cl' + i.id)) say('anchor', ['a:reopen', 'a:stay'], 1); }
