@@ -574,9 +574,7 @@ async function begin(m) {
   if (kind && !LV.feed) toast('LIVE', 'Live data could not be loaded. Running a simulated day instead.', 'var(--red)');
   startWorker({ seed: (Math.random() * 1e9) | 0, cap: 14000, targetCars: 8000, mode: m, profile, startT, warm: 15 * 60 * 4, feed: L.feed, world: L.world });
 }
-$('goShift').onclick = () => begin('shift');
 $('goWhat').onclick = () => begin('whatif');
-$('goWatch').onclick = () => begin('watch');
 $('goLive').onclick = () => begin('live');
 $('goReplay').onclick = () => begin('replay');
 $('liveBadge').onclick = () => { selection = { k: 'live', id: 0 }; renderSheet(true); snd('ui'); };

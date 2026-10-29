@@ -8,7 +8,7 @@ VIEW = sys.argv[1] if len(sys.argv) > 1 else 'desk'
 MODE = sys.argv[2] if len(sys.argv) > 2 else 'live'
 FAKE = sys.argv[3] if len(sys.argv) > 3 else None
 W, H = (390, 844) if VIEW == 'phone' else (1280, 800)
-BTN = {'live': '#goLive', 'replay': '#goReplay', 'watch': '#goWatch', 'shift': '#goShift', 'whatif': '#goWhat'}[MODE]
+BTN = {'live': '#goLive', 'replay': '#goReplay', 'whatif': '#goWhat'}[MODE]
 TAG = f'shots/{MODE}_{VIEW}'
 
 FLY = """([x, y, h]) => { const c = __gl.cam; c.x = x; c.y = y; c.h = h; __gl.DIR.auto = false; }"""
