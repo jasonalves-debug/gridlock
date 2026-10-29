@@ -456,7 +456,7 @@ function areaBar() {
     + `<div class="areaact">${s.cams.length ? `<button type="button" data-cam="${s.cams[0].i}">Nearest camera</button>` : ''}<button type="button" data-area="edit">Change</button><button type="button" data-area="close" aria-label="Close">×</button></div>`;
 }
 function areaRing(c) {
-  if (!AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
+  if (!AREA.open || !AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
   const rx = Math.hypot(q[0] - p[0], q[1] - p[1]), ry = Math.hypot(q2[0] - p[0], q2[1] - p[1]); if (rx < 30) return; // too far out: the ring would be a speck
   c.save(); c.setLineDash([8, 8]); c.lineDashOffset = -performance.now() / 80; c.strokeStyle = 'rgba(82,199,255,.8)'; c.fillStyle = 'rgba(82,199,255,.05)'; c.lineWidth = 2;
   c.beginPath(); c.ellipse(p[0], p[1], rx, ry, 0, 0, 7); c.fill(); c.stroke(); c.restore();
@@ -467,7 +467,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-area]'); if (!b) return;
   if (b.dataset.area === 'close') { AREA.open = false; areaBar(); } else if (b.dataset.area === 'edit') { AREA.edit = true; areaBar(); } });
 setInterval(() => { if (AREA.open && !AREA.edit && AREA.g) areaBar(); }, 20000);
-function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; if (areaSet(AREA.fsa, true)) toast('MY AREA', `Showing ${AREA.fsa}. Tap the pin to change it.`, 'var(--cyan)'); }
+function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; const g = areaGeom(AREA.fsa); if (g) AREA.g = g; } // load the saved area quietly: no auto-fly, no ring until the pin is opened
 // ---------------- TV mode: the screen on its own. Hides the controls, keeps the screen awake, runs the director's idle tour,
 // shows a permanent ticker. Start it from the TV button, the T key, or the TV tile on the start screen (open the file with #tv to feature it).
 const TV = { on: false, idleT: 0, fsAsked: false };
