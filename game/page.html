@@ -167,6 +167,22 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .rep b { font-family: var(--f-mono); text-align: right; }
 .rep .bad { color: var(--red); } .rep .good { color: var(--green); } .rep .warn { color: #ffb020; }
 @media (max-width: 420px) { .modes { grid-template-columns: 1fr; } }
+/* ---------- TV mode */
+.mode.tvtile { grid-column: 1 / -1; } .mode.tvtile .tag { color: #ff6b6b; } .mode.tvtile.first { border-color: #ff6b6b; box-shadow: 0 0 0 1px #ff6b6b, 0 0 24px rgba(255,107,107,.25); }
+.vig { position: fixed; inset: 0; pointer-events: none; z-index: 8; opacity: 0; transition: opacity .8s; background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.6) 100%); } body.tv .vig, body.cine .vig { opacity: 1; }
+#tvbar { position: fixed; left: 0; right: 0; bottom: 5vh; height: 36px; z-index: 11; display: none; background: rgba(6,9,13,.95); border-top: 2px solid #d7141a; }
+body.tv #tvbar { display: flex; } #tvbar .tag { background: #d7141a; color: #fff; font: 800 13px var(--f-mono); letter-spacing: .1em; display: flex; align-items: center; padding: 0 14px; }
+#tvbar .clk { color: #fff; font: 700 14px var(--f-mono); display: flex; align-items: center; padding: 0 14px; border-right: 1px solid rgba(255,255,255,.2); white-space: nowrap; }
+#tvbar .crawl { position: relative; flex: 1; overflow: hidden; } #tvbar .crawl span { position: absolute; left: 0; top: 50%; white-space: nowrap; font-size: 15px; font-weight: 600; color: #e8edf2; will-change: transform; }
+body.tv #bars i { height: 5vh; }
+body.tv #hud, body.tv #feed, body.tv #tools, body.tv #areabar, body.tv #h24bar { opacity: 0; pointer-events: none !important; transition: opacity .4s; }
+body.tv #bcast .tick, body.tv #bcast .back { display: none; } body.tv #bcast .lower { bottom: calc(5vh + 46px); } body.tv #ticker { top: calc(5vh + 34px) !important; }
+body.tv.tvidle, body.tv.tvidle * { cursor: none !important; }
+#tvExit { position: fixed; top: calc(5vh + 8px); left: 12px; z-index: 12; opacity: 0; pointer-events: none; transition: opacity .3s; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.3); color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; cursor: pointer; }
+body.tv:not(.tvidle) #tvExit { opacity: 1; pointer-events: auto; }
+#bcast .pip { position: absolute; right: 14px; top: calc(5vh + 44px); width: min(30vw, 340px); border: 2px solid #f2f2f0; box-shadow: 0 10px 34px rgba(0,0,0,.6); background: #000; animation: pipin .5s cubic-bezier(.2,.8,.2,1) backwards; }
+#bcast .pip img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; } #bcast .pip span { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.74); color: #fff; font: 700 11px var(--f-mono); letter-spacing: .06em; padding: 4px 8px; }
+@keyframes pipin { from { transform: translateY(-14px); opacity: 0; } }
 /* ---------- broadcast */
 #bars i { position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 9; transition: height .6s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
 #bars .top { top: 0; } #bars .bot { bottom: 0; }
@@ -220,13 +236,17 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
 <div id="hint" hidden></div>
 <div id="tools" hidden>
   <div class="rail" id="causeRow" hidden></div>
-  <div class="rail" id="toolRow"><button type="button" class="tool" id="areaBtn" hidden aria-pressed="false" aria-label="My area (postal code)" title="My area: enter the first 3 characters of your postal code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></button><button type="button" class="tool" id="h24Btn" hidden aria-pressed="false" aria-label="Calls in the last 24 hours" title="Every real call in the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="camBtn" aria-label="Director camera" title="Director camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/></svg></button><button type="button" class="tool" id="muteBtn" aria-label="Sound" title="Sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="muteWave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button></div>
+  <div class="rail" id="toolRow"><button type="button" class="tool" id="tvBtn" hidden aria-pressed="false" aria-label="TV mode" title="TV mode (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="areaBtn" hidden aria-pressed="false" aria-label="My area (postal code)" title="My area: enter the first 3 characters of your postal code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></button><button type="button" class="tool" id="h24Btn" hidden aria-pressed="false" aria-label="Calls in the last 24 hours" title="Every real call in the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="camBtn" aria-label="Director camera" title="Director camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/></svg></button><button type="button" class="tool" id="muteBtn" aria-label="Sound" title="Sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="muteWave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button></div>
 </div>
 <div id="h24bar" hidden></div>
 <div id="areabar" hidden></div>
 <div id="sheet" hidden></div>
+<div class="vig" aria-hidden="true"></div>
+<div id="tvbar" aria-hidden="true"><b class="tag">EASTWIRE</b><span class="clk" id="tvClk"></span><div class="crawl"><span id="tvCrawl"></span></div></div>
+<button type="button" id="tvExit">Exit TV mode (T)</button>
 <div id="bars" aria-hidden="true"><i class="top"></i><i class="bot"></i></div>
 <div id="bcast" hidden>
+  <div class="pip" id="bcPip" hidden><img id="bcPipImg" alt="Traffic camera"><span id="bcPipTag"></span></div>
   <div class="bug"><b><i></i>LIVE</b><span>EASTWIRE</span><em id="bcClock">7:42</em></div>
   <div class="lower"><div class="lt" id="bcTitle">401 CLOSED</div><div class="ls" id="bcSub">OPP on scene</div><div class="tick"><span class="tag">EASTWIRE</span><div class="crawl"><span id="bcCrawl"></span></div></div></div>
   <button type="button" class="back" id="bcBack">Back to ops ✕</button>
@@ -240,6 +260,7 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
     <div class="modes">
       <button class="mode live" id="goLive" type="button"><span class="tag">● LIVE DATA · RIGHT NOW</span><b>Scarborough right now</b><span>Real police and fire calls, real roadwork, real weather and TTC buses, pulled fresh when you open this. The cars are simulated. What happens to them is real.</span><span class="lstat" id="liveStat"><i class="dot"></i>Pulling live Toronto data…</span></button>
       <button class="mode" id="goReplay" type="button"><span class="tag">REPLAY · LAST 24 HOURS</span><b>Today, replayed</b><span>The last day of real calls, played back on the streets where they happened.</span></button>
+      <button class="mode tvtile" id="goTv" type="button"><span class="tag">TV MODE · LEAVE IT ON</span><b>Scarborough on screen</b><span>Fullscreen, no controls. The camera tours what is happening and cuts to incidents, with live traffic cameras and a news ticker. Press T to leave.</span></button>
       <button class="mode" id="goWhat" type="button"><span class="tag">SANDBOX</span><b>What if…</b><span>Close any street, cause a crash or a blackout, and watch how the city reroutes around it.</span></button>
     </div>
     <div class="tod" id="tod" role="group" aria-label="What-if time of day"><button type="button" data-p="rush" aria-pressed="true">Rush hour</button><button type="button" data-p="midday" aria-pressed="false">Midday</button><button type="button" data-p="night" aria-pressed="false">Late night</button></div>

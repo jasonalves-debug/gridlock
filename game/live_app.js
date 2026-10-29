@@ -51,7 +51,7 @@ function worldInitFor(m, kind) { // m: shift | watch | whatif (live and replay r
 function replayStart(epoch0) { const now = Date.now() / 1000; const calls = (LV.feed && LV.feed.calls) || []; const first = calls.length ? Math.min(...calls.map(c => c.ts)) : now - 86400; return Math.max(now - 86400, first - 900) - epoch0; }
 async function liveAfterReady() { // real calls go in once the player is watching, so each one is seen arriving
   if (!LV.feed) return;
-  setTimeout(areaAfterReady, 1200);
+  tvHooks(); setTimeout(areaAfterReady, 1200);
   if (LV.kind) {
     const r = await cmd('liveFeed', { live: { calls: LV.feed.calls, hwy: LV.feed.hwy } }, { calls: true, buses: false });
     const spots = LV.ws ? LV.ws.spots.length : 0;
@@ -468,4 +468,52 @@ document.addEventListener('click', e => {
   if (b.dataset.area === 'close') { AREA.open = false; areaBar(); } else if (b.dataset.area === 'edit') { AREA.edit = true; areaBar(); } });
 setInterval(() => { if (AREA.open && !AREA.edit && AREA.g) areaBar(); }, 20000);
 function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; if (areaSet(AREA.fsa, true)) toast('MY AREA', `Showing ${AREA.fsa}. Tap the pin to change it.`, 'var(--cyan)'); }
+// ---------------- TV mode: the screen on its own. Hides the controls, keeps the screen awake, runs the director's idle tour,
+// shows a permanent ticker. Start it from the TV button, the T key, or the TV tile on the start screen (open the file with #tv to feature it).
+const TV = { on: false, idleT: 0, fsAsked: false };
+const SCENIC = [['Scarborough Town Centre', 43.7764, -79.2577], ['University of Toronto Scarborough', 43.7845, -79.1870], ["Bluffer's Park", 43.7063, -79.2298]];
+const inMap = (x, y) => x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3];
+function camNear(x, y) { const i = nearestCam(x, y, 650); if (i < 0) return null; const c = cams()[i], v = c.views && c.views[0]; return v ? { name: c.name, url: camSrc(v[1]) } : null; }
+function tvStops() { // everything worth pointing the camera at right now, each with a weight. The director picks one at random, favouring what it hasn't shown lately.
+  const out = [], P = G.proj, wl = LV.wl || {}, xy = (la, ln) => [(ln - P.lon0) * P.kx, -(la - P.lat0) * P.ky];
+  const add = (kind, key, w, shot, title, sub) => out.push({ kind, key, w, shot, title, sub });
+  for (const i of incidents) { if (i.state === 'cleared' || i.type === 'roadclosed' || !isNews(i)) continue; const [t, s] = DIR.incTitle(i); add('inc', 'i' + i.id, 6, { type: 'orbit', x: i.x, y: i.y, h: i.type === 'hwy' ? 520 : 260, pitch: 0.98, dur: 11, spin: 0.08 }, t, s); }
+  for (const [nm, r, x, y] of wl.slow || []) add('slow', 's' + nm, 5 + (1 - r) * 8, { type: 'orbit', x: x - 350, y: y - 200, x1: x + 350, y1: y + 200, h: 420, pitch: 0.95, dur: 12, spin: 0.05 }, nm.toUpperCase(), `Buses at ${Math.round(r * 100)}% of timetable pace`);
+  (wl.hm || []).forEach((m, h) => { if (m >= 1.25) { const H = G.hoods[h]; add('hood', 'h' + h, 2 + (m - 1) * 6, { type: 'orbit', x: H.x - 450, y: H.y - 280, x1: H.x + 450, y1: H.y + 280, h: 1200, pitch: 0.9, dur: 13, spin: 0.04 }, H.n.toUpperCase(), 'Buses behind timetable. Traffic likely heavier.'); } });
+  const cs = cams(); for (let n = 0; n < 8 && cs.length; n++) { const c = cs[(Math.random() * cs.length) | 0]; if (!inMap(c.x, c.y)) continue; add('cam', 'c' + c.name, 2.2, { type: 'orbit', x: c.x, y: c.y, h: 210, pitch: 1.0, dur: 10, spin: 0.1 }, 'CAMERA · ' + c.name.toUpperCase(), c.src === '511' ? 'Ontario 511 traffic camera' : 'City of Toronto traffic camera'); }
+  const sw = (LV.stat && LV.stat.subway) || {}; for (const k in sw) { const [nm, la, ln] = sw[k], [x, y] = xy(la, ln); if (inMap(x, y)) add('stn', 't' + nm, 0.6, { type: 'orbit', x, y, h: 260, pitch: 1.0, dur: 9, spin: 0.1 }, nm.toUpperCase() + ' STATION', 'TTC subway'); }
+  for (const [nm, la, ln] of SCENIC) { const [x, y] = xy(la, ln); if (inMap(x, y)) add('scenic', 'sc' + nm, 1.3, { type: 'orbit', x, y, h: 700, pitch: 0.9, dur: 12, spin: 0.05 }, nm.toUpperCase(), 'Scarborough'); }
+  const zs = (LV.zones || []).filter(z => z.on && z.road); for (let n = 0; n < 3 && zs.length; n++) { const z = zs[(Math.random() * zs.length) | 0]; add('work', 'z' + z.id, 1.4, { type: 'orbit', x: z.x, y: z.y, h: 300, pitch: 1.0, dur: 9, spin: 0.1 }, 'ROAD WORK · ' + String(z.road).toUpperCase(), String(z.why || 'Work zone').slice(0, 80)); }
+  if (AREA.g && AREA.fsa) { const s = areaStats(); add('home', 'home', 3.5, { type: 'orbit', x: AREA.g.x, y: AREA.g.y, h: Math.min(4400, Math.max(1700, AREA.g.r * 3)), pitch: 0.9, dur: 12, spin: 0.05 }, 'HOME WATCH · ' + AREA.fsa, `${s.onScene} calls on scene · ${s.total} in the last 24 hours`); }
+  if (envDusk() > 0.45) { const am = simT / 3600 % 24 < 12, [bx, by] = xy(SCENIC[2][1], SCENIC[2][2]), at = inMap(bx, by) ? [bx, by] : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+    add('sun', 'sun' + Math.floor(Date.now() / 1.2e6), 16, { type: 'orbit', x: at[0], y: at[1], h: 420, pitch: 1.1, dur: 15, spin: 0.035, nopip: true }, am ? 'SUNRISE OVER SCARBOROUGH' : 'SUNSET OVER SCARBOROUGH', clock(simT, true)); }
+  if (rainOn || snowOn) { const c = cs.length ? cs[(Math.random() * cs.length) | 0] : null, at = c && inMap(c.x, c.y) ? [c.x, c.y] : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]; add('wx', 'wx', 3, { type: 'orbit', x: at[0], y: at[1], h: 500, pitch: 1.05, dur: 11, spin: 0.05 }, snowOn ? 'SNOW ACROSS THE EAST END' : 'RAIN ACROSS THE EAST END', 'Slower roads'); }
+  return out;
+}
+function tvStats() { // the standing lines in the ticker, rebuilt each time it wraps
+  const out = [], now = Date.now() / 1000, calls = ((LV.feed && LV.feed.calls) || []).filter(c => now - c.ts < 3600), wx = LV.feed && LV.feed.weather, wl = LV.wl || {};
+  if (wx && wx.temperature_2m != null) out.push(`NOW ${Math.round(wx.temperature_2m)}°C${wx.precipitation > 0 ? ' · PRECIPITATION' : ''}`);
+  out.push(`CALLS IN THE LAST HOUR: ${calls.length} (${calls.filter(c => c.src === 'tps').length} POLICE · ${calls.filter(c => c.src !== 'tps' && c.act !== 'medical').length} FIRE · ${calls.filter(c => c.src !== 'tps' && c.act === 'medical').length} MEDICAL)`);
+  const on = incidents.filter(i => i.type === 'call' && i.state !== 'cleared').length; if (on) out.push(`${on} REAL CALL${on > 1 ? 'S' : ''} ON SCENE NOW`);
+  out.push(`HIGHWAYS: ${incidents.filter(i => i.type === 'hwy' && i.state !== 'cleared').length} ACTIVE 511 INCIDENTS`);
+  if (wl.late && wl.late[1] >= 8) out.push(`BUS PACE: ${Math.round(100 * (1 - wl.late[0] / wl.late[1]))}% OF BUS-SERVED ROADS ON TIMETABLE`);
+  if (wl.slow && wl.slow[0]) out.push(`SLOWEST ROAD: ${wl.slow[0][0].toUpperCase()}, BUSES AT ${Math.round(wl.slow[0][1] * 100)}% OF TIMETABLE PACE`);
+  const zn = (LV.zones || []).filter(z => z.on).length; if (zn) out.push(`${zn} ROAD WORK ZONES ACTIVE`);
+  return out;
+}
+let wakeLock = null;
+async function tvWake() { try { if (TV.on && navigator.wakeLock && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) {} }
+function tvSet(on, fs) {
+  if (on === TV.on) return; TV.on = on; document.body.classList.toggle('tv', on); document.body.classList.remove('tvidle'); DIR.setTV(on); const b = $('tvBtn'); if (b) b.setAttribute('aria-pressed', String(on));
+  if (on) { DIR.auto = true; $('camBtn').setAttribute('aria-pressed', 'true'); tvWake(); closeSheet(); if (fs && !document.fullscreenElement) { TV.fsAsked = true; try { document.documentElement.requestFullscreen(); } catch (e) {} } tvIdle(); }
+  else { if (wakeLock) { wakeLock.release(); wakeLock = null; } clearTimeout(TV.idleT); if (document.fullscreenElement) { TV.fsAsked = false; try { document.exitFullscreen(); } catch (e) {} } }
+}
+function tvIdle() { document.body.classList.remove('tvidle'); clearTimeout(TV.idleT); TV.idleT = setTimeout(() => document.body.classList.add('tvidle'), 3000); }
+addEventListener('pointermove', () => { if (TV.on) tvIdle(); });
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && TV.on && TV.fsAsked) tvSet(false); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tvWake(); });
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#tvBtn, #tvExit')) tvSet(!TV.on, true); });
+addEventListener('keydown', e => { if (!LV.kind || (e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) return; if (e.key === 't' || e.key === 'T') tvSet(!TV.on, true); }, true);
+addEventListener('webglcontextlost', () => { if (TV.on) setTimeout(() => location.reload(), 3000); }, true);
+function tvHooks() { DIR.tourSource = tvStops; DIR.camNear = camNear; DIR.tvStats = tvStats; }
 loadFeed(true);

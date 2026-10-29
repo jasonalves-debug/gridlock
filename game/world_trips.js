@@ -116,8 +116,13 @@
   function stepAreas() {
     const sum = new Float32Array(H), cnt = new Float32Array(H);
     for (const [e, c] of live.real.caps) if (c.r != null && simT - c.t < 600) { const h = edgeHood[e]; if (h >= 0) { sum[h] += c.r; cnt[h]++; } }
+    const R = live.real; if (!R.hr || R.hr.length !== H) R.hr = new Float32Array(H).fill(1);
+    const by = new Map(); let nLate = 0, nAll = 0; // for the broadcast: slowest named roads and the share of roads behind timetable
+    for (const [e, c] of R.caps) if (c.r != null && simT - c.t < 600) { nAll++; if (c.r < 0.75) nLate++; const nm = edgeName(e); if (!nm || c.n < 2) continue; const o = by.get(nm) || { s: 0, n: 0, e, lo: 9 }; o.s += c.r; o.n++; if (c.r < o.lo) { o.lo = c.r; o.e = e; } by.set(nm, o); }
+    R.lateN = [nLate, nAll];
+    R.slow = [...by].filter(([, o]) => o.s / o.n < 0.7).sort((a, b) => a[1].s / a[1].n - b[1].s / b[1].n).slice(0, 4).map(([nm, o]) => { const [x, y] = posOnEdge(o.e, eLen[o.e] / 2, 0); return [nm, +(o.s / o.n).toFixed(2), Math.round(x), Math.round(y)]; });
     for (let h = 0; h < H; h++) {
-      const r = cnt[h] >= 3 ? sum[h] / cnt[h] : 1, target = r >= 0.9 ? 1 : Math.min(2.2, Math.pow(0.9 / Math.max(0.3, r), 1.5)); // 75% of timetable pace → 1.3x trips, 50% → 2.2x
+      const r = cnt[h] >= 3 ? sum[h] / cnt[h] : 1; R.hr[h] = r; const target = r >= 0.9 ? 1 : Math.min(2.2, Math.pow(0.9 / Math.max(0.3, r), 1.5)); // 75% of timetable pace → 1.3x trips, 50% → 2.2x
       const m = hoodMul[h] + (target - hoodMul[h]) * 0.25; if (Math.abs(m - hoodMul[h]) > 0.002) setHoodMul(h, m);
     }
   }

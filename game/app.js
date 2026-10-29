@@ -138,7 +138,7 @@ function cmd(fn, ...args) { return new Promise(res => { const id = reqSeq++; pen
 function onWorker(m) {
   const d = m.data;
   if (d.type === 'progress') { $('loadBar').style.width = Math.round(d.p * 100) + '%'; $('loadTxt').textContent = 'Morning traffic is building…'; }
-  else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; $('start').hidden = true; $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
+  else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; $('tvBtn').hidden = !LV.kind; if (LV.tvNext) { LV.tvNext = false; setTimeout(() => tvSet(true, false), 300); } if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; $('start').hidden = true; $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
   else if (d.type === 'frame') {
     frameWaiting = false; spareBuf = posBuf; posBuf = d.buf; frameN = d.n; simT = d.t; rainOn = d.rain; snowOn = d.snow; fogOn = d.fog; stormOn = d.storm; onWorld(d);
     if (d.spd) { R.setSpeeds(d.spd, d.cut); R.setSignals(d.sig); summary = d.summary; incidents = d.incidents; units = d.units; pool = d.summary.pool; updateHud(); updateFeed(); refreshSheet(); try { DIR.onSlow(); } catch (err) { console.error(err); } }
@@ -201,7 +201,7 @@ function buildHud() {
   $('speedBtn').onclick = () => { setSpeed(speeds[(speeds.indexOf(lastSpeed) + 1) % speeds.length]); snd('ui'); };
   $('statBtn').onclick = () => togglePanel('chips', 'statBtn'); $('incBtn').onclick = () => togglePanel('feed', 'incBtn');
   $('progWrap').hidden = mode !== 'shift';
-  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn):not(#h24Btn):not(#areaBtn)').forEach(b => b.remove());
+  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn):not(#h24Btn):not(#areaBtn):not(#tvBtn)').forEach(b => b.remove());
   const tools = [['traffic', 'Traffic colours'], ['tilt', '3D view'], ['sign', 'Warning sign'], ['local', 'Local traffic only'], ['inspect', 'Inspect']];
   if (mode === 'whatif') tools.splice(4, 0, ['cause', 'Cause trouble']);
   tools.forEach(([k, l], i) => { const b = document.createElement('button'); b.className = 'tool' + (i === 0 || i === 2 ? ' sep' : ''); b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(k === 'cause' ? 'crash' : k); b.onclick = () => onTool(k); tr.appendChild(b); });
@@ -218,7 +218,7 @@ function togglePanel(id, btn) { // stats row and incident list: open on tap, clo
   if (open) { updateHud(); updateFeed(); } layout();
 }
 function syncTools() {
-  document.querySelectorAll('.tool').forEach(b => { const k = b.id.slice(5); let on = k === tool; if (k === 'traffic') on = overlayOn; if (k === 'tilt') on = tiltGoal > 0.1; if (k === 'cause') on = !$('causeRow').hidden; if (k === 'rain') on = !!rainOn; if (b.id === 'h24Btn') on = H24.on; if (b.id === 'areaBtn') on = AREA.open; b.setAttribute('aria-pressed', String(on)); });
+  document.querySelectorAll('.tool').forEach(b => { const k = b.id.slice(5); let on = k === tool; if (k === 'traffic') on = overlayOn; if (k === 'tilt') on = tiltGoal > 0.1; if (k === 'cause') on = !$('causeRow').hidden; if (k === 'rain') on = !!rainOn; if (b.id === 'h24Btn') on = H24.on; if (b.id === 'areaBtn') on = AREA.open; if (b.id === 'tvBtn') on = TV.on; b.setAttribute('aria-pressed', String(on)); });
   const hints = { local: 'Tap a neighbourhood street to make it local traffic only. Tap again to remove.', sign: 'Tap where drivers should see a warning sign. They will reroute.', crash: 'Tap a road to cause a crash.', water: 'Tap a road to break a water main under it.', closure: 'Tap an intersection to have police close it.', power: 'Tap a spot to cut the power there.', close: 'Tap a road to close or reopen it.' };
   const h = $('hint'); if (hints[tool]) { h.textContent = hints[tool]; h.hidden = false; } else h.hidden = true;
 }
@@ -577,6 +577,8 @@ async function begin(m) {
 $('goWhat').onclick = () => begin('whatif');
 $('goLive').onclick = () => begin('live');
 $('goReplay').onclick = () => begin('replay');
+$('goTv').onclick = () => { try { document.documentElement.requestFullscreen(); TV.fsAsked = true; } catch (e) {} LV.tvNext = true; begin('live'); };
+if (location.hash === '#tv') { $('goTv').classList.add('first'); $('goTv').scrollIntoView({ block: 'center' }); }
 $('liveBadge').onclick = () => { selection = { k: 'live', id: 0 }; renderSheet(true); snd('ui'); };
 $('skipBtn').onclick = async () => { const r = await cmd('jumpNext'); if (r && r.ok === false) toast('REPLAY', r.msg, 'var(--muted)'); snd('ui'); };
 $('tod').querySelectorAll('button').forEach(b => b.onclick = () => { profile = b.dataset.p; $('tod').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
@@ -607,5 +609,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { get LV() { return LV; }, get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { get LV() { return LV; }, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();

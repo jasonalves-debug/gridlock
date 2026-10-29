@@ -7,6 +7,7 @@ const DIR = (function () {
   let shot = null, shotQ = [], lastShotEnd = -1e9, savedCam = null, lastUser = 0;
   let pressure = 0, pressureT = 0; const broadcastSeen = new Set(); const stuckSeen = new Set(); const stuckClock = new Map();
   const headlines = []; let crawlX = 0;
+  let tv = false, tourSource = null, camNear = null, tvStats = null, heavyOn = false, lastHeavy = 0, pipT = 0, pipCam = null, lastTourKind = '', first = true; const tourSeen = new Map();
   // ---------------------------------------------------------------- audio graph for voices & music
   function audioReady() {
     if (!AC || radioIn) return !!radioIn;
@@ -68,7 +69,18 @@ const DIR = (function () {
   function division(x, y) { let best = null, bd = 1e18; for (const d of G.depots) { if (d.k !== 'police') continue; const dd = (d.x - x) ** 2 + (d.y - y) ** 2; if (dd < bd) { bd = dd; best = d; } } return best ? 'd:' + best.n.slice(0, 2) : 'd:dispatch'; }
   function crossKeys(name) { const parts = (name || '').split(/ & | - /); if (parts.length === 2 && rk(parts[0]) && rk(parts[1])) return ['d:at', rk(parts[0]), 'd:and', rk(parts[1])]; return rk(parts[0]) ? ['d:on', rk(parts[0])] : []; }
   // ---------------------------------------------------------------- broadcast / headlines
-  function headline(t) { headlines.unshift(t); if (headlines.length > 6) headlines.pop(); $('bcCrawl').textContent = headlines.join('   ●   '); }
+  function headline(t) { const now = Date.now(); if (headlines.some(h => h.x === t && now - h.t < 1800000)) return; headlines.unshift({ x: t, t: now }); if (headlines.length > 8) headlines.pop(); $('bcCrawl').textContent = headlines.map(h => h.x).join('   ●   '); }
+  const ago = ms => { const m = Math.round(ms / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.floor(m / 60) + ' h ago'; };
+  function tickerText() { const now = Date.now(); const hs = headlines.filter(h => now - h.t < 10800000).slice(0, 6).map(h => `${h.x} · ${ago(now - h.t)}`); return [...hs, ...(tvStats ? tvStats() : [])].join('   ●   ') || 'EASTWIRE · SCARBOROUGH LIVE'; }
+  // ---------------------------------------------------------------- picture-in-picture: the nearest real traffic camera
+  function pipShow(s) { const el = $('bcPip'); if (!el) return; pipCam = null; if (camNear && !s.nopip && s.type !== 'follow' && s.type !== 'wide' && s.x != null) pipCam = camNear(s.x, s.y); if (!pipCam) { el.hidden = true; return; }
+    const img = $('bcPipImg'); el.hidden = true; img.onerror = () => { el.hidden = true; }; img.onload = () => { el.hidden = false; }; img.src = pipCam.url; $('bcPipTag').textContent = 'CAM · ' + pipCam.name.toUpperCase(); pipT = performance.now(); }
+  // ---------------------------------------------------------------- idle tour (TV mode): weighted pick of things worth looking at right now
+  function pickTour() {
+    if (!tourSource) return null; const list = tourSource(); if (!list.length) return null; const now = performance.now();
+    const w = list.map(c => { const age = now - (tourSeen.get(c.key) || -1e9); return c.w * (age < 300000 ? 0.04 : age < 900000 ? 0.35 : 1) * (c.kind === lastTourKind ? 0.45 : 1); });
+    let r = Math.random() * w.reduce((a, b) => a + b, 0), i = 0; while (i < w.length - 1 && (r -= w[i]) > 0) i++;
+    const c = list[i]; tourSeen.set(c.key, now); lastTourKind = c.kind; return c; }
   function lowerThird(title, sub) { $('bcTitle').textContent = title; $('bcSub').textContent = sub; const lt = $('bcTitle'), ls = $('bcSub'); [lt, ls].forEach(el => { el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }); }
   function incTitle(i) {
     if (i.type === 'hwy' && i.real && i.desc) { // Ontario 511's own words: "Disabled Vehicle on HWY 401 Eastbound EXPRESS at PORT UNION ROAD, Toronto. Left lane closed."
@@ -122,13 +134,14 @@ const DIR = (function () {
   function startShot(s) {
     if (!savedCam) savedCam = { x: cam.x, y: cam.y, h: cam.h, pitch: cam.pitch, yaw: cam.yaw || 0, tilt: tiltGoal };
     shot = Object.assign({ t: 0, yaw: (cam.yaw || 0) }, s); camGoal = null; document.body.classList.add('cine'); $('bcast').hidden = false;
-    if (s.title) lowerThird(s.title, s.sub || '');
+    if (s.title) lowerThird(s.title, s.sub || ''); pipShow(s);
     if (s.anchor && !broadcastSeen.has(s.anchorKey)) { broadcastSeen.add(s.anchorKey); say('anchor', s.anchor, 3); }
     if (AC && !muted && s.sting) sting();
   }
+  function cineOff() { document.body.classList.remove('cine'); $('bcast').hidden = true; $('bcPip').hidden = true; pipCam = null; }
   function endShot(byUser) {
-    if (!shot) return; shot = null; lastShotEnd = performance.now(); document.body.classList.remove('cine'); $('bcast').hidden = true;
-    if (savedCam) { camGoal = { x: savedCam.x, y: savedCam.y, h: savedCam.h }; tiltGoal = savedCam.tilt; yawGoal = savedCam.yaw; savedCam = null; }
+    if (!shot) return; shot = null; lastShotEnd = performance.now(); cineOff();
+    if (savedCam) { if (!tv) { camGoal = { x: savedCam.x, y: savedCam.y, h: savedCam.h }; tiltGoal = savedCam.tilt; yawGoal = savedCam.yaw; } savedCam = null; } // TV mode keeps flying on from wherever the last shot ended
     if (byUser) { lastUser = performance.now(); shotQ = []; }
   }
   let yawGoal = 0;
@@ -136,18 +149,23 @@ const DIR = (function () {
   function followYaw(a) { const gx = Math.cos(a), gy = -Math.sin(a); return Math.atan2(-gx, gy); }
   function stepShot(dt) {
     const now = performance.now();
+    if (tv && autoCam && ready && !ended && now - lastUser > 20000) {
+      if (shot && shot.tour && shotQ.length && shotQ[0].pri >= 2 && shot.t > 5) { const nx = shotQ.shift(); shot = null; startShot(nx); } // a real incident cuts into the tour
+      else if (!shot && !shotQ.length) { const c = pickTour(); if (c) startShot(Object.assign({ tour: true, pri: 0 }, c.shot, { title: c.title, sub: c.sub })); }
+    }
+    if (!shot && !shotQ.length && document.body.classList.contains('cine')) cineOff();
     if (!shot && shotQ.length && now - lastShotEnd > (shotQ[0].pri >= 3 || shotQ[0].chain ? 1200 : mode === 'watch' ? 4000 : 22000) && now - lastUser > 6000 && ready) startShot(shotQ.shift());
     if (!shot) { cam.yaw = (cam.yaw || 0) + (((yawGoal - (cam.yaw || 0) + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, dt * 3); if (Math.abs(yawGoal) < 0.001 && Math.abs(cam.yaw) < 0.001) cam.yaw = 0; return; }
     shot.t += dt; const k = 1 - Math.exp(-dt * 1.6);
     let tx = shot.x, ty = shot.y, th = shot.h || 420, tp = shot.pitch || 0.95, tyaw = cam.yaw;
     if (shot.type === 'follow') { const u = findUnit(shot.unit); if (u) { tx = u[0] + Math.cos(u[2]) * 25; ty = u[1] + Math.sin(u[2]) * 25; tyaw = followYaw(u[2]); shot.lastU = u; } else if (shot.lastU) { tx = shot.lastU[0]; ty = shot.lastU[1]; } th = 230; tp = 1.08; }
     else if (shot.type === 'chopper') { const h = helis.find(q => q.id === shot.heli); if (h) { const mx = h.tx * 0.7 + h.x * 0.3, my = h.ty * 0.7 + h.y * 0.3; tx = mx; ty = my; tyaw = followYaw(Math.atan2(h.ty - h.y, h.tx - h.x)); } th = 360; tp = 1.0; }
-    else { tyaw = shot.yaw + shot.t * (shot.spin || 0.1); if (shot.track) { let sx = shot.x, sy = shot.y, n = 1; for (const u of units) if (u.inc === shot.track && u.state === 'onscene' && Math.hypot(u.x - shot.x, u.y - shot.y) < 700) { sx += u.x; sy += u.y; n++; } tx = sx / n; ty = sy / n; } }
+    else { tyaw = shot.yaw + shot.t * (shot.spin || 0.1); if (shot.x1 != null) { const f = Math.min(1, shot.t / (shot.dur || 9)), e = f * f * (3 - 2 * f); tx = shot.x + (shot.x1 - shot.x) * e; ty = shot.y + (shot.y1 - shot.y) * e; } if (shot.track) { let sx = shot.x, sy = shot.y, n = 1; for (const u of units) if (u.inc === shot.track && u.state === 'onscene' && Math.hypot(u.x - shot.x, u.y - shot.y) < 700) { sx += u.x; sy += u.y; n++; } tx = sx / n; ty = sy / n; } }
     if (shot.type === 'wide') { th = 6500; tp = 0.8; }
     cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.h *= Math.pow(th / cam.h, k); cam.pitch += (tp - cam.pitch) * k; tiltGoal = cam.pitch;
     let dy = tyaw - (cam.yaw || 0); while (dy > Math.PI) dy -= 6.283; while (dy < -Math.PI) dy += 6.283; cam.yaw = (cam.yaw || 0) + dy * Math.min(1, dt * (shot.type === 'follow' ? 2.2 : 1.2));
     $('bcClock').textContent = clock(simT, true);
-    if (shot.t > (shot.dur || 9)) { const next = shot.then; endShot(false); if (next) { lastShotEnd = -1e9; startShot(next); } }
+    if (shot.t > (shot.dur || 9)) { const next = shot.then; if (tv && shot.tour && !next) { shot = null; return; } endShot(false); if (next) { lastShotEnd = -1e9; startShot(next); } }
   }
   // ---------------------------------------------------------------- music (tension bed)
   let mNext = 0, mStep = 0; const BPM = 96, S16 = 60 / BPM / 4;
@@ -246,7 +264,12 @@ const DIR = (function () {
     const hw = incidents.some(i => i.type === 'hwy' && i.state !== 'cleared');
     const target = Math.min(1, 0.35 * Math.min(1, s.stuck / 900) + 0.25 * Math.min(1, maxQ / 350) + 0.2 * Math.max(...s.anger) / 100 + (hw ? 0.2 : 0) + (rainOn ? 0.08 : 0));
     pressure += (target - pressure) * 0.15;
-    if (pressure > 0.75 && !broadcastSeen.has('standstill')) { broadcastSeen.add('standstill'); headline('SCARBOROUGH AT A STANDSTILL'); say('anchor', ['a:standstill', 'a:backed'], 2); requestShot({ type: 'wide', x: cam.x, y: cam.y, dur: 7, pri: 2, title: 'GRIDLOCK ACROSS THE EAST END', sub: `${s.stuck.toLocaleString('en-CA')} drivers stuck more than two minutes` }); }
+    // heavy-traffic headline. Live: real signals only (buses behind timetable in several areas, plus a real highway closure). Replay: the sim's stuck count.
+    const hm = (LV.wl && LV.wl.hm) || [], hot = hm.filter(v => v >= 1.5).length, hwyShut = incidents.some(i => i.type === 'hwy' && i.real && !(i.nlanes > 0) && i.state !== 'cleared');
+    const heavy = LV.kind === 'live' ? (hot >= 3 || (hot >= 2 && hwyShut)) : pressure > 0.75, nowMs = Date.now(), liveK = LV.kind === 'live';
+    if (heavy && !heavyOn && nowMs - lastHeavy > 2400000) { heavyOn = true; lastHeavy = nowMs; headline(liveK ? 'HEAVY TRAFFIC ACROSS SCARBOROUGH' : 'SCARBOROUGH AT A STANDSTILL'); if (hwyShut || !liveK) say('anchor', ['a:backed'], 2);
+      requestShot({ type: 'wide', x: cam.x, y: cam.y, dur: 7, pri: 2, title: liveK ? 'HEAVY TRAFFIC ACROSS SCARBOROUGH' : 'GRIDLOCK ACROSS THE EAST END', sub: liveK ? `${hot} neighbourhoods with buses behind timetable${hwyShut ? ' · highway closure' : ''}` : `${s.stuck.toLocaleString('en-CA')} drivers stuck more than two minutes` }); }
+    else if (heavyOn && !heavy) { heavyOn = false; if (nowMs - lastHeavy > 600000) headline('TRAFFIC EASING'); }
     const now = performance.now();
     for (const u of units) {
       if (!u.responder || u.state !== 'enroute' || u.quiet) { stuckClock.delete(u.id); continue; }
@@ -256,11 +279,13 @@ const DIR = (function () {
       else stuckClock.delete(u.id);
     }
   }
-  function frame(dt) { stepHelis(dt); stepShot(dt); rotorFrame(); musicTick(); const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
+  function frame(dt) { stepHelis(dt); stepShot(dt); rotorFrame(); musicTick();
+    if (tv) { const cr = $('tvCrawl'); if (cr) { if (!cr.textContent || crawlX < -cr.offsetWidth) { cr.textContent = tickerText(); crawlX = cr.parentElement.offsetWidth * (first ? 0.2 : 1); first = false; } crawlX -= dt * 70; cr.style.transform = `translate(${crawlX}px, -50%)`; $('tvClk').textContent = clock(simT, true); } }
+    if (pipCam && shot && performance.now() - pipT > 45000) { const c = camNear && camNear(shot.x, shot.y); pipT = performance.now(); if (c) $('bcPipImg').src = c.url; } const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
   function hold(ms) { if (shot) endShot(true); shotQ = []; lastUser = performance.now() + ms; } // pause the auto camera, e.g. after the viewer picks their own area
   function userInput() { lastUser = performance.now(); if (shot) endShot(true); }
   $('bcBack').onclick = () => endShot(true);
   $('camBtn').setAttribute('aria-pressed', String(autoCam));
   $('camBtn').onclick = () => { autoCam = !autoCam; store.set('autocam', autoCam); $('camBtn').setAttribute('aria-pressed', String(autoCam)); if (!autoCam) { endShot(true); } toast('CAMERA', autoCam ? 'Director camera on. It will cut to big moments.' : 'Director camera off.', 'var(--cyan)'); };
-  return { onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
+  return { incTitle, setTV(v) { tv = v; crawlX = 0; first = true; const cr = $('tvCrawl'); if (cr) cr.textContent = ''; if (!v) { shotQ = []; if (shot) endShot(true); } }, set tourSource(f) { tourSource = f; }, set camNear(f) { camNear = f; }, set tvStats(f) { tvStats = f; }, onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
 })();

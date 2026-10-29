@@ -145,6 +145,7 @@
       worship: live.worship.map((w, i) => w.active ? i : -1).filter(i => i >= 0), sites: live.sites.map((s, i) => s.working ? i : -1).filter(i => i >= 0),
       gates: rail.crossings.map((c, i) => c.down ? i : -1).filter(i => i >= 0), rb: [...live.real.buses.values()].map(b => { const [x, y] = realPos(b); return [b.id, b.route, Math.round(x), Math.round(y), b.v == null ? null : +(b.v * 3.6).toFixed(0)]; }),
       spots: live.spots.map((p, i) => p.on ? i : -1).filter(i => i >= 0), day: dayInfo(simT),
+      hm: Array.from(hoodMul, v => +v.toFixed(2)), hr: live.real.hr ? Array.from(live.real.hr, v => +v.toFixed(2)) : null, slow: live.real.slow || [], late: live.real.lateN || [0, 0],
       blk: live.real.blk.map(k => [k.id, Math.round(k.x), Math.round(k.y), k.n, k.routes.join(', '), k.mins, k.road]) };
   }
 
