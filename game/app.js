@@ -605,7 +605,6 @@ $('goTv').onclick = () => { try { document.documentElement.requestFullscreen(); 
 if (location.hash === '#tv') { $('goTv').classList.add('first'); $('goTv').scrollIntoView({ block: 'center' }); }
 $('liveBadge').onclick = () => { selection = { k: 'live', id: 0 }; renderSheet(true); snd('ui'); };
 $('skipBtn').onclick = async () => { const r = await cmd('jumpNext'); if (r && r.ok === false) toast('REPLAY', r.msg, 'var(--muted)'); snd('ui'); };
-$('tod').querySelectorAll('button').forEach(b => b.onclick = () => { profile = b.dataset.p; $('tod').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
 if (store.get('autostart', null) === 'whatif') { store.set('autostart', null); setTimeout(() => begin('whatif'), 50); }
 
 // ---------------------------------------------------------------- main loop
