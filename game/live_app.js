@@ -473,7 +473,9 @@ function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; const
 // shows a permanent ticker. Start it from the TV button, the T key, or the TV tile on the start screen (open the file with #tv to feature it).
 const TV = { on: false, idleT: 0, fsAsked: false };
 const SCENIC = [['Scarborough Town Centre', 43.7764, -79.2577], ['University of Toronto Scarborough', 43.7845, -79.1870], ["Bluffer's Park", 43.7063, -79.2298]];
-const inMap = (x, y) => x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3];
+let MAPG = null; // where the modelled city actually is: 300 m cells holding road junctions. The map's bounding box is mostly corners with nothing in them.
+const inMap = (x, y) => { if (!MAPG) { MAPG = new Map(); for (let i = 0; i < G.nx.length; i++) { const k = Math.floor(G.nx[i] / 300) * 100003 + Math.floor(G.ny[i] / 300); MAPG.set(k, (MAPG.get(k) || 0) + 1); } }
+  const cx = Math.floor(x / 300), cy = Math.floor(y / 300); let full = 0; for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) if ((MAPG.get((cx + ax) * 100003 + cy + ay) || 0) >= 2) full++; return full >= 6; };
 function camNear(x, y) { const i = nearestCam(x, y, 650); if (i < 0) return null; const c = cams()[i], v = c.views && c.views[0]; return v ? { name: c.name, url: camSrc(v[1]) } : null; }
 function roadDir(x, y) { // unit heading of the nearest arterial segment, so a flying shot runs along the road instead of across it
   let best = 1e18, dir = [1, 0]; for (let e = 0; e < G.ea.length; e++) { if (G.cls[e] > 4) continue; const a = G.ea[e], b = G.eb[e], ax = G.nx[a], ay = G.ny[a], vx = G.nx[b] - ax, vy = G.ny[b] - ay, L2 = vx * vx + vy * vy || 1;
@@ -482,11 +484,13 @@ function flyShot(x, y, h, dur, len = 380) { const [dx, dy] = roadDir(x, y), s = 
 const spinR = v => (Math.random() < 0.5 ? -1 : 1) * v;
 function tvStops() { // everything worth pointing the camera at right now, each with a weight. The director picks one at random, favouring what it hasn't shown lately.
   const out = [], P = G.proj, wl = LV.wl || {}, xy = (la, ln) => [(ln - P.lon0) * P.kx, -(la - P.lat0) * P.ky];
-  const KICK = { inc: 'ON SCENE', slow: 'TRAFFIC', hood: 'TRANSIT', cam: 'LIVE CAMERA', stn: 'TRANSIT', scenic: 'SCARBOROUGH', work: 'ROAD WORK', home: 'HOME WATCH', sun: 'SCARBOROUGH', wx: 'WEATHER' }, night = envNight() > 0.6;
+  const KICK = { recent: 'EARLIER', inc: 'ON SCENE', slow: 'TRAFFIC', hood: 'TRANSIT', cam: 'LIVE CAMERA', stn: 'TRANSIT', scenic: 'SCARBOROUGH', work: 'ROAD WORK', home: 'HOME WATCH', sun: 'SCARBOROUGH', wx: 'WEATHER' }, night = envNight() > 0.6;
   const add = (kind, key, w, shot, title, sub, vo, chain) => out.push({ kind, key, w, shot, title, sub, vo, chain, kick: KICK[kind] });
   for (const i of incidents) { if (i.state === 'cleared' || i.type === 'roadclosed' || !isNews(i)) continue; const [t, s] = DIR.incTitle(i); const H0 = i.type === 'hwy' ? 620 : 420; add('inc', 'i' + i.id, 6, { type: 'orbit', move: 'push', x: i.x, y: i.y, h: H0, pitch: 0.8, dur: 6, spin: spinR(0.03), then: { type: 'orbit', x: i.x, y: i.y, h: H0, pitch: 0.85, dur: 8, spin: spinR(0.07) } }, t, s, ['tv:inc']); }
   for (const [nm, r, x, y] of wl.slow || []) add('slow', 's' + nm, 5 + (1 - r) * 8, flyShot(x, y, 480, 13), nm.toUpperCase(), `Buses at ${Math.round(r * 100)}% of timetable pace`, DIR.has('tr:' + nm) ? ['t:slowon', 'tr:' + nm, 't:busesbehind'] : ['t:slowroad'], 'traffic');
   (wl.hm || []).forEach((m, h) => { if (m >= 1.25) { const H = G.hoods[h]; add('hood', 'h' + h, 2 + (m - 1) * 6, flyShot(H.x, H.y, 1100, 14, 700), H.n.toUpperCase(), 'Buses behind timetable. Traffic likely heavier.', DIR.has('th:' + H.n) ? ['t:latearound', 'th:' + H.n, 't:expect'] : null, 'traffic'); } });
+  { const now = Date.now() / 1000; for (const it of pulseItems()) { if (it.pin || it.x == null || now - it.t > 5400 || !(it.sel || it.hot)) continue; if (incidents.some(i => i.state !== 'cleared' && isNews(i) && Math.hypot(i.x - it.x, i.y - it.y) < 150)) continue; // already covered as an active scene
+      add('recent', 'r' + it.id, it.hot ? 4 : 1.5, { type: 'orbit', move: 'push', x: it.x, y: it.y, h: 460, pitch: 0.8, dur: 10, spin: spinR(0.04) }, it.title.toUpperCase(), `${it.sub} · ${ago(now - it.t)}`, null); out[out.length - 1].kick = now - it.t < 1800 ? 'JUST IN' : 'EARLIER'; if (out.filter(o => o.kind === 'recent').length >= 4) break; } }
   const cs = cams(); for (let n = 0; n < 8 && cs.length; n++) { const c = cs[(Math.random() * cs.length) | 0]; if (!inMap(c.x, c.y)) continue; add('cam', 'c' + c.name, 2.2, { type: 'orbit', move: 'push', x: c.x, y: c.y, h: 380, pitch: 0.8, dur: 11, spin: spinR(0.02) }, 'CAMERA · ' + c.name.toUpperCase(), c.src === '511' ? 'Ontario 511 traffic camera' : 'City of Toronto traffic camera', ['tv:cam']); }
   const sw = (LV.stat && LV.stat.subway) || {}; for (const k in sw) { const [nm, la, ln] = sw[k], [x, y] = xy(la, ln); if (inMap(x, y)) add('stn', 't' + nm, 0.6, { type: 'orbit', move: 'crane', x, y, h: 420, pitch: 0.85, dur: 11, spin: spinR(0.06) }, nm.toUpperCase() + ' STATION', 'TTC subway', ['tv:stn']); }
   for (const [nm, la, ln] of SCENIC) { const [x, y] = xy(la, ln); if (inMap(x, y)) add('scenic', 'sc' + nm, 1.3, { type: 'orbit', move: 'crane', x, y, h: 700, pitch: 0.8, dur: 14, spin: spinR(0.035) }, nm.toUpperCase(), night ? 'Scarborough after dark' : 'Scarborough', [night ? 'tv:night' : 'tv:scenic']); }
@@ -495,17 +499,20 @@ function tvStops() { // everything worth pointing the camera at right now, each 
   if (envDusk() > 0.45) { const am = simT / 3600 % 24 < 12, [bx, by] = xy(SCENIC[2][1], SCENIC[2][2]), at = inMap(bx, by) ? [bx, by] : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
     add('sun', 'sun' + Math.floor(Date.now() / 1.2e6), 16, { type: 'orbit', move: 'crane', x: at[0], y: at[1], h: 520, pitch: 0.95, dur: 16, spin: spinR(0.03), nopip: true }, am ? 'SUNRISE OVER SCARBOROUGH' : 'SUNSET OVER SCARBOROUGH', clock(simT, true), [am ? 'tv:sunrise' : 'tv:sunset']); }
   if (rainOn || snowOn) { const c = cs.length ? cs[(Math.random() * cs.length) | 0] : null, at = c && inMap(c.x, c.y) ? [c.x, c.y] : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]; add('wx', 'wx', 3, { type: 'orbit', x: at[0], y: at[1], h: 650, pitch: 0.85, dur: 11, spin: 0.05 }, snowOn ? 'SNOW ACROSS THE EAST END' : 'RAIN ACROSS THE EAST END', 'Slower roads', [snowOn ? 'tv:snow' : 'tv:rain']); }
-  return out;
+  return out.filter(s => inMap(s.shot.x, s.shot.y) && (s.shot.x1 == null || inMap(s.shot.x1, s.shot.y1))); // never point the camera at empty ground
 }
-function tvStats() { // the standing lines in the ticker, rebuilt each time it wraps
+function tvStats() { // the ticker: the newest real events, then the standing numbers. Rebuilt each time it wraps.
   const out = [], now = Date.now() / 1000, calls = ((LV.feed && LV.feed.calls) || []).filter(c => now - c.ts < 3600), wx = LV.feed && LV.feed.weather, wl = LV.wl || {};
-  if (wx && wx.temperature_2m != null) out.push(`NOW ${Math.round(wx.temperature_2m)}°C${wx.precipitation > 0 ? ' · PRECIPITATION' : ''}`);
-  out.push(`CALLS IN THE LAST HOUR: ${calls.length} (${calls.filter(c => c.src === 'tps').length} POLICE · ${calls.filter(c => c.src !== 'tps' && c.act !== 'medical').length} FIRE · ${calls.filter(c => c.src !== 'tps' && c.act === 'medical').length} MEDICAL)`);
-  const on = incidents.filter(i => i.type === 'call' && i.state !== 'cleared').length; if (on) out.push(`${on} REAL CALL${on > 1 ? 'S' : ''} ON SCENE NOW`);
-  out.push(`HIGHWAYS: ${incidents.filter(i => i.type === 'hwy' && i.state !== 'cleared').length} ACTIVE 511 INCIDENTS`);
-  if (wl.late && wl.late[1] >= 8) out.push(`BUS PACE: ${Math.round(100 * (1 - wl.late[0] / wl.late[1]))}% OF BUS-SERVED ROADS ON TIMETABLE`);
-  if (wl.slow && wl.slow[0]) out.push(`SLOWEST ROAD: ${wl.slow[0][0].toUpperCase()}, BUSES AT ${Math.round(wl.slow[0][1] * 100)}% OF TIMETABLE PACE`);
-  const zn = (LV.zones || []).filter(z => z.on).length; if (zn) out.push(`${zn} ROAD WORK ZONES ACTIVE`);
+  for (const it of pulseItems().filter(i => !i.pin).slice(0, 6)) out.push([{ police: 'POLICE', fire: 'FIRE', medical: 'MEDICAL', road: 'ROADS', ttc: 'TRANSIT', wx: 'WEATHER' }[it.kind], `${it.title.toUpperCase()} · ${it.sub.toUpperCase()} · ${ago(now - it.t).toUpperCase()}`]);
+  if (wx && wx.temperature_2m != null) out.push(['WEATHER', `${Math.round(wx.temperature_2m)}°C ${wxWord(wx).replace(/\s*-?\d+°$/, '').toUpperCase()} · WIND ${Math.round(wx.wind_speed_10m || 0)} KM/H${wx.wind_gusts_10m >= 40 ? ' GUSTING ' + Math.round(wx.wind_gusts_10m) : ''}`]);
+  out.push(['CITY', `CALLS IN THE LAST HOUR: ${calls.length} (${calls.filter(c => c.src === 'tps').length} POLICE · ${calls.filter(c => c.src !== 'tps' && c.act !== 'medical').length} FIRE · ${calls.filter(c => c.src !== 'tps' && c.act === 'medical').length} MEDICAL)`]);
+  const L = pulseLevel(); out.push(['CITY', `CITY PULSE: ${L.word} · ${levelLine(L).toUpperCase()}`]);
+  const on = incidents.filter(i => i.type === 'call' && i.state !== 'cleared').length; if (on) out.push(['CITY', `${on} REAL CALL${on > 1 ? 'S' : ''} ON SCENE NOW`]);
+  out.push(['ROADS', `HIGHWAYS: ${incidents.filter(i => i.type === 'hwy' && i.state !== 'cleared').length} ACTIVE 511 INCIDENTS`]);
+  if (wl.slow && wl.slow[0]) out.push(['TRANSIT', `SLOWEST ROAD: ${wl.slow[0][0].toUpperCase()}, BUSES AT ${Math.round(wl.slow[0][1] * 100)}% OF TIMETABLE PACE`]);
+  if (wl.late && wl.late[1] >= 8) out.push(['TRANSIT', `${Math.round(100 * (1 - wl.late[0] / wl.late[1]))}% OF BUS-SERVED ROADS ON TIMETABLE`]);
+  const ta = ((LV.feed && LV.feed.ttc_alerts) || []).length; if (ta) out.push(['TRANSIT', `${ta} TTC SERVICE ALERTS IN EFFECT`]);
+  const zn = (LV.zones || []).filter(z => z.on).length; if (zn) out.push(['ROADS', `${zn} ROAD WORK ZONES ACTIVE`]);
   return out;
 }
 let wakeLock = null;
@@ -513,7 +520,8 @@ async function tvWake() { try { if (TV.on && navigator.wakeLock && !wakeLock) { 
 function tvSet(on, fs) {
   if (on === TV.on) return; TV.on = on; document.body.classList.toggle('tv', on); document.body.classList.remove('tvidle'); DIR.setTV(on); const b = $('tvBtn'); if (b) b.setAttribute('aria-pressed', String(on));
   if (on) { DIR.auto = true; $('camBtn').setAttribute('aria-pressed', 'true'); tvWake(); closeSheet(); if (fs && !document.fullscreenElement) { TV.fsAsked = true; try { document.documentElement.requestFullscreen(); } catch (e) {} } tvIdle(); }
-  else { if (wakeLock) { wakeLock.release(); wakeLock = null; } clearTimeout(TV.idleT); if (document.fullscreenElement) { TV.fsAsked = false; try { document.exitFullscreen(); } catch (e) {} } }
+  tvLayout(); tvDesk();
+  if (!on) { if (wakeLock) { wakeLock.release(); wakeLock = null; } clearTimeout(TV.idleT); if (document.fullscreenElement) { TV.fsAsked = false; try { document.exitFullscreen(); } catch (e) {} } }
 }
 function tvIdle() { document.body.classList.remove('tvidle'); clearTimeout(TV.idleT); TV.idleT = setTimeout(() => document.body.classList.add('tvidle'), 3000); }
 addEventListener('pointermove', () => { if (TV.on) tvIdle(); });
@@ -544,5 +552,5 @@ function tvBoard() {
     + `<div class="bd-foot"><span>Highways <b>${hw}</b> 511 incidents</span><span>Road work <b>${zn}</b> zones</span></div>`;
   return { x: (bbox[0] + bbox[2]) / 2 - (bbox[2] - bbox[0]) * 0.08, y: (bbox[1] + bbox[3]) / 2, sub: `${temp == null ? '' : temp + '° · '}${calls.length} calls in the last hour`, vo, html };
 }
-function tvHooks() { DIR.tourSource = tvStops; DIR.camNear = camNear; DIR.tvStats = tvStats; DIR.boardSource = tvBoard; }
+function tvHooks() { DIR.mapOk = inMap; DIR.tourSource = tvStops; DIR.camNear = camNear; DIR.tvStats = tvStats; DIR.boardSource = tvBoard; }
 loadFeed(true);

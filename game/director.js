@@ -7,7 +7,7 @@ const DIR = (function () {
   let shot = null, shotQ = [], lastShotEnd = -1e9, savedCam = null, lastUser = 0;
   let pressure = 0, pressureT = 0; const broadcastSeen = new Set(); const stuckSeen = new Set(); const stuckClock = new Map();
   const headlines = []; let crawlX = 0;
-  let tv = false, tourSource = null, camNear = null, tvStats = null, heavyOn = false, lastHeavy = 0, pipT = 0, pipCam = null, lastTourKind = '', first = true, lastVo = 0, lastBoard = 0, boardSource = null, chatNext = performance.now() + 30000; const tourSeen = new Map();
+  let tv = false, mapOk = null, tourSource = null, camNear = null, tvStats = null, heavyOn = false, lastHeavy = 0, pipT = 0, pipCam = null, lastTourKind = '', first = true, lastVo = 0, lastBoard = 0, boardSource = null, chatNext = performance.now() + 30000; const tourSeen = new Map();
   // ---------------------------------------------------------------- audio graph for voices & music
   function audioReady() {
     if (!AC || radioIn) return !!radioIn;
@@ -79,13 +79,25 @@ const DIR = (function () {
   // ---------------------------------------------------------------- broadcast / headlines
   function headline(t) { const now = Date.now(); if (headlines.some(h => h.x === t && now - h.t < 1800000)) return; headlines.unshift({ x: t, t: now }); if (headlines.length > 8) headlines.pop(); $('bcCrawl').textContent = headlines.map(h => h.x).join('   ●   '); }
   const ago = ms => { const m = Math.round(ms / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.floor(m / 60) + ' h ago'; };
-  function tickerText() { const now = Date.now(); const hs = headlines.filter(h => now - h.t < 10800000).slice(0, 6).map(h => `${h.x} · ${ago(now - h.t)}`); return [...hs, ...(tvStats ? tvStats() : [])].join('   ●   ') || 'EASTWIRE · SCARBOROUGH LIVE'; }
+  const TK = { NEWS: '#d7141a', POLICE: '#2f8fd6', FIRE: '#e0700f', MEDICAL: '#d93a5a', ROADS: '#c98a00', TRANSIT: '#b3261e', WEATHER: '#3d6fd0', CITY: '#2a9d6f' };
+  function tickerHtml() { const now = Date.now(), e = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); const hs = headlines.filter(h => now - h.t < 10800000).slice(0, 4).map(h => ['NEWS', `${h.x} · ${ago(now - h.t)}`]);
+    const all = [...hs, ...(tvStats ? tvStats() : [])].map(x => Array.isArray(x) ? x : ['CITY', x]); if (!all.length) return '<span class="tk"><b style="--c:#d7141a">EASTWIRE</b>SCARBOROUGH LIVE</span>';
+    return all.map(([c, t]) => `<span class="tk"><b style="--c:${TK[c] || TK.CITY}">${c}</b>${e(t)}</span>`).join(''); }
   // ---------------------------------------------------------------- picture-in-picture: the nearest real traffic camera
   function pipShow(s) { const el = $('bcPip'); if (!el) return; pipCam = null; if (camNear && !s.nopip && s.type !== 'follow' && s.type !== 'wide' && s.x != null) pipCam = camNear(s.x, s.y); if (!pipCam) { el.hidden = true; return; }
     const img = $('bcPipImg'); el.hidden = true; img.onerror = () => { el.hidden = true; }; img.onload = () => { el.hidden = false; }; img.src = pipCam.url; $('bcPipTag').textContent = 'CAM · ' + pipCam.name.toUpperCase(); pipT = performance.now(); }
   // ---------------------------------------------------------------- idle tour (TV mode): weighted pick of things worth looking at right now
-  function pickTour() {
-    if (!tourSource) return null; const list = tourSource(); if (!list.length) return null; const now = performance.now();
+  const RUN = [['TOP STORY', ['inc', 'recent'], 1], ['TRAFFIC', ['slow', 'work'], 2], ['LIVE CAMERAS', ['cam'], 2], ['TRANSIT', ['hood', 'stn'], 1], ['AROUND SCARBOROUGH', ['scenic', 'sun', 'home', 'wx'], 2], ['TRAFFIC & WEATHER', null, 1]];
+  let runI = -1, runLeft = 0, segName = '';
+  function setSeg(name, brk) { segName = name; const el = $('tvSeg'); if (el && el.textContent !== name) { el.textContent = name; el.classList.toggle('brk', !!brk); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
+    const nx = $('tvNext'); if (nx) { const out = []; for (let k = 1; out.length < 3 && k <= RUN.length; k++) { const s = RUN[(Math.max(0, runI) + k) % RUN.length]; if (s[0] !== name) out.push(s[0]); } nx.innerHTML = out.map((s, i) => `<div><i>${i + 1}</i>${s}</div>`).join(''); } }
+  function nextTour() { const now = performance.now();
+    for (let tries = 0; tries <= RUN.length; tries++) { if (runLeft <= 0) { runI = (runI + 1) % RUN.length; runLeft = RUN[runI][2]; } const seg = RUN[runI];
+      if (!seg[1]) { runLeft = 0; if (boardSource && now - lastBoard > 330000) { const b = boardSource(); if (b) return { board: b, seg }; } continue; }
+      const c = pickTour(seg[1]); if (c) { runLeft--; return { c, seg }; } runLeft = 0; }
+    const c = pickTour(null); return c ? { c, seg: ['SCARBOROUGH LIVE'] } : null; }
+  function pickTour(kinds) {
+    if (!tourSource) return null; let list = tourSource(); if (kinds) list = list.filter(c => kinds.includes(c.kind)); if (!list.length) return null; const now = performance.now();
     const w = list.map(c => { const age = now - (tourSeen.get(c.key) || -1e9); return c.w * (age < 300000 ? 0.04 : age < 900000 ? 0.35 : 1) * (c.kind === lastTourKind ? 0.45 : 1); });
     let r = Math.random() * w.reduce((a, b) => a + b, 0), i = 0; while (i < w.length - 1 && (r -= w[i]) > 0) i++;
     const c = list[i]; tourSeen.set(c.key, now); lastTourKind = c.kind; return c; }
@@ -140,9 +152,11 @@ const DIR = (function () {
   // ---------------------------------------------------------------- camera shots
   function requestShot(s) { if (!autoCam || ended) return; s.pri = s.pri || 1; shotQ = shotQ.filter(q => q.pri >= s.pri - 1); shotQ.push(s); shotQ.sort((a, b) => b.pri - a.pri); }
   function startShot(s) {
+    if (tv && mapOk && s.x != null && s.type !== 'wide' && s.type !== 'follow' && s.type !== 'chopper' && !mapOk(s.x, s.y)) s = Object.assign({}, s, { type: 'wide', move: null, x1: null, then: null }); // nothing modelled there: show it from high up instead of a close-up of bare ground
     if (!savedCam) savedCam = { x: cam.x, y: cam.y, h: cam.h, pitch: cam.pitch, yaw: cam.yaw || 0, tilt: tiltGoal };
     shot = Object.assign({ t: 0, yaw: (cam.yaw || 0) }, s); camGoal = null; document.body.classList.add('cine'); $('bcast').hidden = false;
     const kick = s.kick || (s.sting ? 'BREAKING NEWS' : s.tour ? '' : 'LIVE'); $('bcast').classList.toggle('brk', !!s.sting); $('bcast').classList.toggle('board', !!s.board);
+    if (tv && !s.tour) setSeg(s.sting ? 'BREAKING NEWS' : 'LIVE', !!s.sting);
     if (s.title) lowerThird(s.title, s.sub || '', kick); pipShow(s); $('tvboard').classList.toggle('on', !!s.board);
     if (tv && s.x != null && s.type !== 'follow' && s.type !== 'chopper') { if (Math.hypot(s.x - cam.x, s.y - cam.y) > 2500) dipCut(s); else whoosh(0.025); }
     if (s.anchor && !broadcastSeen.has(s.anchorKey)) { broadcastSeen.add(s.anchorKey); say('anchor', s.anchor, 3); }
@@ -167,10 +181,10 @@ const DIR = (function () {
     const now = performance.now();
     if (tv && autoCam && ready && !ended && now - lastUser > 20000) {
       if (shot && shot.tour && shotQ.length && shotQ[0].pri >= 2 && shot.t > 5) { const nx = shotQ.shift(); shot = null; startShot(nx); } // a real incident cuts into the tour
-      else if (!shot && !shotQ.length && boardSource && now - lastBoard > 480000) { const b = boardSource(); lastBoard = now; // traffic & weather, every 8 minutes
-        if (b) { startShot({ type: 'wide', x: b.x, y: b.y, dur: Math.max(14, voDur(b.vo) + 3), pri: 1, tour: true, board: true, nopip: true, title: 'EASTWIRE TRAFFIC & WEATHER', sub: b.sub, kick: 'TRAFFIC & WEATHER' }); $('tvboard').innerHTML = b.html; say('traffic', b.vo, 2); lastVo = now; } }
-      else if (!shot && !shotQ.length) { const c = pickTour(); if (c) { startShot(Object.assign({ tour: true, pri: 0 }, c.shot, { title: c.title, sub: c.sub, kick: c.kick }));
-        if (c.vo && now - lastVo > 25000 && !speaking && Math.random() < 0.6) { say(c.chain || 'anchor', c.vo, 1); lastVo = now; } } }
+      else if (!shot && !shotQ.length) { const n = nextTour();
+        if (n && n.board) { const b = n.board; lastBoard = now; setSeg(n.seg[0]); startShot({ type: 'wide', x: b.x, y: b.y, dur: Math.max(14, voDur(b.vo) + 3), pri: 1, tour: true, board: true, nopip: true, title: 'EASTWIRE TRAFFIC & WEATHER', sub: b.sub, kick: 'TRAFFIC & WEATHER' }); $('tvboard').innerHTML = b.html; say('traffic', b.vo, 2); lastVo = now; }
+        else if (n) { const c = n.c; setSeg(n.seg[0]); startShot(Object.assign({ tour: true, pri: 0 }, c.shot, { title: c.title, sub: c.sub, kick: c.kick }));
+          if (c.vo && now - lastVo > 25000 && !speaking && Math.random() < 0.6) { say(c.chain || 'anchor', c.vo, 1); lastVo = now; } } }
     }
     if (!shot && !shotQ.length && document.body.classList.contains('cine')) cineOff();
     if (!shot && shotQ.length && now - lastShotEnd > (shotQ[0].pri >= 3 || shotQ[0].chain ? 1200 : mode === 'watch' ? 4000 : 22000) && now - lastUser > 6000 && ready) startShot(shotQ.shift());
@@ -322,7 +336,7 @@ const DIR = (function () {
     }
   }
   function frame(dt) { stepHelis(dt); stepShot(dt); rotorFrame(); musicTick();
-    if (tv) { const cr = $('tvCrawl'); if (cr) { if (!cr.textContent || crawlX < -cr.offsetWidth) { cr.textContent = tickerText(); crawlX = cr.parentElement.offsetWidth * (first ? 0.2 : 1); first = false; } crawlX -= dt * 70; cr.style.transform = `translate(${crawlX}px, -50%)`; $('tvClk').textContent = clock(simT, true); } }
+    if (tv) { const cr = $('tvCrawl'); if (cr) { if (!cr.firstChild || crawlX < -cr.offsetWidth) { cr.innerHTML = tickerHtml(); crawlX = cr.parentElement.offsetWidth * (first ? 0.2 : 1); first = false; } crawlX -= dt * Math.max(70, innerHeight * 0.085); cr.style.transform = `translate(${crawlX}px, -50%)`; $('tvClk').textContent = clock(simT, true); } }
     if (AC && !muted && LV.kind && performance.now() > chatNext) { chatNext = performance.now() + 50000 + Math.random() * 80000; // the radio never quite goes silent
       if (!speaking && !speechQ.length && !(shot && shot.board)) { const n = 1 + ((Math.random() * 7) | 0); if (has('c:' + n + 'a')) { say('chatter', ['c:' + n + 'a'], 0, ''); say('chatter', ['c:' + n + 'b'], 0, ''); } } }
     if (pipCam && shot && performance.now() - pipT > 45000) { const c = camNear && camNear(shot.x, shot.y); pipT = performance.now(); if (c) $('bcPipImg').src = c.url; } const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
@@ -331,5 +345,5 @@ const DIR = (function () {
   $('bcBack').onclick = () => endShot(true);
   $('camBtn').setAttribute('aria-pressed', String(autoCam));
   $('camBtn').onclick = () => { autoCam = !autoCam; store.set('autocam', autoCam); $('camBtn').setAttribute('aria-pressed', String(autoCam)); if (!autoCam) { endShot(true); } toast('CAMERA', autoCam ? 'Director camera on. It will cut to big moments.' : 'Director camera off.', 'var(--cyan)'); };
-  return { incTitle, setTV(v) { tv = v; crawlX = 0; first = true; lastBoard = performance.now() - 420000; const cr = $('tvCrawl'); if (cr) cr.textContent = ''; if (!v) { shotQ = []; if (shot) endShot(true); } }, set tourSource(f) { tourSource = f; }, set camNear(f) { camNear = f; }, set tvStats(f) { tvStats = f; }, set boardSource(f) { boardSource = f; }, has, voDur, onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
+  return { incTitle, get seg() { return segName; }, setTV(v) { tv = v; crawlX = 0; first = true; runI = -1; runLeft = 0; lastBoard = performance.now() - 240000; const cr = $('tvCrawl'); if (cr) cr.textContent = ''; if (v) setSeg('SCARBOROUGH LIVE'); if (!v) { shotQ = []; if (shot) endShot(true); } }, set tourSource(f) { tourSource = f; }, set mapOk(f) { mapOk = f; }, set camNear(f) { camNear = f; }, set tvStats(f) { tvStats = f; }, set boardSource(f) { boardSource = f; }, has, voDur, onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
 })();

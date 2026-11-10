@@ -94,7 +94,8 @@ const glc = $('gl'), ovc = $('ov'), ov = ovc.getContext('2d');
 R.init(glc, G, isPhone ? 'phone' : 'high');
 const cam = R.cam;
 let DPR = Math.min(window.devicePixelRatio || 1, isPhone ? 1.75 : 2);
-function resize() { const w = innerWidth, h = innerHeight; R.resize(w, h, DPR); ovc.width = Math.round(w * DPR); ovc.height = Math.round(h * DPR); layout(); }
+let GLS = 1; // 3D render scale on top of DPR: drops when frames are slow, climbs back when they are not. The city itself is never switched off.
+function resize() { const w = innerWidth, h = innerHeight, cap = Math.sqrt(5.2e6 / Math.max(1, w * h * DPR * DPR)); R.resize(w, h, DPR * Math.max(0.45, Math.min(1, GLS, cap))); ovc.width = Math.round(w * DPR); ovc.height = Math.round(h * DPR); layout(); }
 function fitView(anim) {
   const cx = (bbox[0] + bbox[2]) / 2, cy = (bbox[1] + bbox[3]) / 2; const asp = innerWidth / innerHeight; const tan = Math.tan(20 * Math.PI / 180);
   const topPad = 60, botPad = 20; const usable = Math.max(200, innerHeight - topPad - botPad) / innerHeight;
@@ -498,6 +499,7 @@ function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcT
 let FONT = null, MONO = null; function getFont() { return FONT || (FONT = getComputedStyle(document.documentElement).getPropertyValue('--f-display')); } function getMono() { return MONO || (MONO = getComputedStyle(document.documentElement).getPropertyValue('--f-mono')); }
 
 // ---------------------------------------------------------------- audio
+const SEASON = (() => { try { const m = +new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', month: 'numeric' }).format(new Date()); return [1, 1, 1, 0.9, 0.2, 0, 0, 0, 0.1, 0.5, 0.82, 1][m - 1] || 0; } catch (e) { return 0; } })(); // 0 = full summer leaf, 0.5 = autumn colour, 1 = bare
 let liftV = 0, AC = null, master = null, amb = null, nearG = null, windG = null, pbT = 1, abT = 15, birdT = 4, bed = null, rainG = null, sirenG = null, sirenO = null, noiseB = null, muted = store.get('muted', false);
 function audioInit() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
@@ -612,12 +614,16 @@ else if (BOOT !== 'menu' && BOOT !== 'tv') { $('start').classList.add('auto'); s
 
 // ---------------------------------------------------------------- main loop
 resize(); fitView(false); addEventListener('resize', () => { resize(); });
-let perfAcc = 0, perfN = 0, lite = false;
+let perfAcc = 0, perfN = 0, lite = false; const perf = { t0: 0, hitch: false, was: 0, noGain: 0, from: 1, lock: false, up: 0, hold: 3 };
 let last = performance.now(), statT = 0, onScreen = { cars: 0, stopped: 0, siren: false };
 function frame(now) {
   requestAnimationFrame(frame);
   const rawDt = (now - last) / 1000; const dt = Math.min(0.1, rawDt); last = now;
-  if (ready && rawDt < 1) { perfAcc += rawDt; perfN++; if (perfN >= 120) { const avg = perfAcc / perfN; perfAcc = 0; perfN = 0; if (avg > 1 / 28) { if (DPR > 1.01) { DPR = Math.max(1, DPR - 0.35); resize(); } else if (!lite) { lite = true; R.setLite(true); } } } }
+  if (ready && !document.hidden && !perf.lock) { if (!perf.t0) perf.t0 = now; if (now - perf.t0 > 6000) { if (rawDt > 0.25) perf.hitch = true; perfAcc += Math.min(rawDt, 0.25); perfN++;
+    if (perfN >= 90) { const avg = perfAcc / perfN, hitch = perf.hitch; perfAcc = 0; perfN = 0; perf.hitch = false;
+      if (!hitch) { if (perf.was) { if (avg > perf.was * 0.93) { if (++perf.noGain >= 2) { GLS = perf.from; perf.lock = true; resize(); } } else perf.noGain = 0; perf.was = 0; } // a smaller picture that is no faster means the display, not the GPU, sets the pace: put it back and stop
+        if (perf.lock) {} else if (avg > 1 / 42) { perf.up = 0; if (GLS > 0.5) { if (!perf.noGain) perf.from = GLS; perf.was = avg; GLS = Math.max(0.5, GLS * 0.84); perf.hold = Math.min(40, perf.hold * 2); resize(); } else if (!lite && avg > 1 / 24) { lite = true; R.setLite(true); } }
+        else if (avg < 1 / 55 && (GLS < 1 || lite)) { if (++perf.up >= perf.hold) { perf.up = 0; if (lite) { lite = false; R.setLite(false); } else { GLS = Math.min(1, GLS * 1.1); resize(); } } } else perf.up = 0; } } } }
   if (camGoal) { const k = 1 - Math.exp(-dt * 3.2); cam.x += (camGoal.x - cam.x) * k; cam.y += (camGoal.y - cam.y) * k; cam.h *= Math.pow(camGoal.h / cam.h, k); if (Math.abs(camGoal.h / cam.h - 1) < 0.002 && Math.hypot(camGoal.x - cam.x, camGoal.y - cam.y) < cam.h * 0.002) camGoal = null; }
   cam.pitch += (tiltGoal - cam.pitch) * (1 - Math.exp(-dt * 4));
   // weather flashes
@@ -629,12 +635,13 @@ function frame(now) {
   const night = envNight();
   const outages = incidents.filter(i => i.type === 'power' && i.state !== 'cleared').map(i => [i.x, i.y, i.r]);
   liftV += (((typeof TV !== 'undefined' && TV.on) ? 1 : 0) - liftV) * Math.min(1, dt * 1.5);
-  R.draw({ lift: liftV, time: now / 1000, night, day: 1 - night, dusk: envDusk(), rain: rainOn && !snowOn ? 1 : 0, snow: snowOn ? 1 : 0, fog: fogOn ? 1 : 0, flash, outages, overlay: overlayOn ? Math.max(0.1, Math.min(1, (cam.wpp - 0.5) / 2.5)) : 0, sigA: Math.max(0, Math.min(1, (3.2 - cam.wpp) / 2)), spriteAlphaN: spr.aN, addN: spr.addN, smokeStart: spr.smokeStart, smokeN: spr.smokeN });
+  const tiltV = ((typeof TV !== 'undefined' && TV.on) || DIR.shot) ? Math.max(0, Math.min(1, (2.4 - cam.wpp) / 1.4)) * Math.max(0, Math.min(1, (cam.pitch - 0.4) / 0.3)) * 0.85 : 0;
+  R.draw({ season: SEASON, tilt: tiltV, lift: liftV, time: now / 1000, night, day: 1 - night, dusk: envDusk(), rain: rainOn && !snowOn ? 1 : 0, snow: snowOn ? 1 : 0, fog: fogOn ? 1 : 0, flash, outages, overlay: overlayOn ? Math.max(0.1, Math.min(1, (cam.wpp - 0.5) / 2.5)) : 0, sigA: Math.max(0, Math.min(1, (3.2 - cam.wpp) / 2)), spriteAlphaN: spr.aN, addN: spr.addN, smokeStart: spr.smokeStart, smokeN: spr.smokeN });
   drawOverlay();
   if (ready) requestFrame();
   statT -= dt; if (statT <= 0 && ready) { statT = 0.5; let cars = 0, stopped = 0, siren = false; const x0 = 0, x1 = innerWidth, y0 = 0, y1 = innerHeight; for (let i = 0; i < frameN; i += 3) { const f = posBuf[i * 4 + 3]; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (!p || p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1) continue; cars += 3; if (((f | 0) >> 3) & 1) stopped += 3; } for (let i = Math.max(0, frameN - 90); i < frameN; i++) { const f = posBuf[i * 4 + 3] | 0; if (!((f >> 14) & 1) || ((f >> 13) & 1) || ((f >> 23) & 1)) continue; const ty = f & 7; if (ty !== 2 && ty !== 3 && ty !== 7) continue; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (p && p[0] > -100 && p[0] < innerWidth + 100 && p[1] > -100 && p[1] < innerHeight + 100) siren = true; } onScreen = { cars, stopped, siren }; }
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { get LV() { return LV; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();
