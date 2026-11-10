@@ -4,6 +4,8 @@ A live traffic simulation of Scarborough on its real streets. Thousands of simul
 public data: police/fire/EMS calls, Ontario 511 highway events, City roadwork and utility digs, 311 hazards,
 TTC alerts/detours and live bus GPS, the TTC timetable, weather, traffic cameras, speed/red-light cameras.
 
+**Update the live copy:** run `./publish.sh` after `python game/build.py` (copies to the gallery repo and bumps the `?v=` on its card so browsers fetch the new file).
+
 **Open it:** https://jasonalves-debug.github.io/gridlock/ (once GitHub Pages is on: Settings → Pages → Deploy from a branch → `main` / root), or download `gridlock.html` and open it in a browser. It opens straight into Live and checks for fresh data every minute.
 
 Links: `#M1K` flies to a postal area, `#c=<call id>` opens one call, `#tv` is TV mode, `#menu` shows Replay and the sandbox.
