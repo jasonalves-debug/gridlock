@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# One GitHub Actions run = about 5.3 hours of rounds, 5 minutes apart. The schedule queues the next run,
+# One GitHub Actions run = about 5.3 hours of rounds, 2.5 minutes apart. The schedule queues the next run,
 # so collection never stops. Data lives on the `data` branch as a single commit that's replaced every round
 # (no history piling up). The game reads it from raw.githubusercontent.com/<owner>/gridlock/data/...
 set -u
-ROUNDS=${ROUNDS:-64} GAP=${GAP:-300}
+ROUNDS=${ROUNDS:-128} GAP=${GAP:-150}
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
 export GRIDLOCK_DATA="$PWD/data"; mkdir -p data
@@ -22,7 +22,7 @@ for round in $(seq 1 "$ROUNDS"); do
   if [ "$round" -eq 1 ] && [ -n "${FORCE_STATIC:-}" ]; then python collect/run.py static || echo "::warning::static feed failed"   # asked for by hand
   else python collect/run.py static-due || echo "::warning::static feed failed"; fi       # daily: timetables, cameras, schools...
   python collect/police_fire.py   || echo "::warning::police/fire failed"            # TPS + TFS calls → incidents.json
-  if [ $(( round % 3 )) -eq 1 ]; then python collect/roadwork.py || echo "::warning::roadwork failed"; fi   # City road restrictions, every 15 min
+  if [ $(( round % 6 )) -eq 1 ]; then python collect/roadwork.py || echo "::warning::roadwork failed"; fi   # City road restrictions, every 15 min
   python collect/run.py live      || echo "::warning::live feed failed"              # → gridlock_live.json
   publish
   if [ "$round" -lt "$ROUNDS" ]; then wait=$(( GAP - ($(date +%s) - started) )); [ "$wait" -gt 0 ] && sleep "$wait"; fi

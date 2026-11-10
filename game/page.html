@@ -229,6 +229,55 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
 @keyframes pulse { 50% { opacity: .35; } }
 .real { display: inline-block; font-family: var(--f-mono); font-size: 9px; font-weight: 800; letter-spacing: .08em; background: #39d98a; color: #04110a; border-radius: 4px; padding: 1px 4px; vertical-align: 1px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- PULSE: one line bottom-left; the front page opens from it (left panel on a big screen, bottom sheet on a phone) */
+#pulse { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); z-index: 6; max-width: min(520px, calc(100vw - 66px)); min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 6px; border-radius: 999px; border: 1px solid var(--line); background: rgba(8,12,17,.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--text); font-size: 15px; cursor: pointer; text-align: left; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+#pulse .lvl { flex: none; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border-radius: 999px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); font: 800 13px var(--f-mono); letter-spacing: .06em; }
+#pulse .lvl i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); animation: pdot 1.8s ease-in-out infinite; }
+@keyframes pdot { 50% { opacity: .35; transform: scale(.7); } }
+#pulse em { flex: none; font-style: normal; font: 800 12px var(--f-mono); background: #39d98a; color: #04110a; border-radius: 999px; padding: 3px 8px; }
+#pulse .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pulse .go { flex: none; color: var(--cyan); font-weight: 800; font-size: 20px; line-height: 1; }
+#pulse.flash { border-color: #39d98a; animation: pflash 1.2s ease-in-out 3; } @keyframes pflash { 50% { box-shadow: 0 0 0 5px rgba(57,217,138,.28), 0 6px 24px rgba(0,0,0,.45); } }
+body.haspulse #h24bar { bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); }
+body.tv #pulse, body.tv #now { display: none !important; }
+@media (min-width: 900px) { body.nowopen #ticker, body.nowopen #feed, body.nowopen #areabar, body.nowopen #h24bar { left: 416px; } }
+#now { position: fixed; z-index: 9; left: 0; right: 0; bottom: 0; max-height: 78%; display: flex; flex-direction: column; background: var(--glass2); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); animation: sheet .3s cubic-bezier(.2,.8,.2,1); font-size: 15px; -webkit-user-select: text; user-select: text; }
+@media (min-width: 900px) { #now { left: 8px; right: auto; top: 46px; bottom: 10px; width: 400px; max-height: none; border: 1px solid var(--line); border-radius: 14px; } }
+#now header { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+#now h2 { margin: 0; font-size: 21px; font-weight: 800; font-stretch: 85%; line-height: 1.1; }
+#now header p { margin: 3px 0 0; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+#now .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); } #now .dot.ok { background: var(--green); }
+#now .px { margin-left: auto; width: 44px; height: 44px; margin-top: -8px; margin-right: -8px; background: none; border: 0; color: var(--muted); font-size: 28px; cursor: pointer; }
+#now .pbody { overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 14px); display: flex; flex-direction: column; }
+#now section, #now footer { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; } #now footer { border: 0; }
+#now h3 { margin: 0; font-size: 12.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+#now p { margin: 0; line-height: 1.4; } #now .pnote { font-size: 13px; color: var(--muted); }
+.plevel { flex-direction: row !important; align-items: baseline; gap: 10px !important; flex-wrap: wrap; } .plevel b { font: 800 22px var(--f-mono); color: var(--c); letter-spacing: .02em; } .plevel span { font-size: 15px; }
+.pvit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.pvit button { min-width: 0; text-align: left; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; } .pvit button:disabled { cursor: default; color: inherit; opacity: 1; }
+.pvit b { font: 700 20px var(--f-mono); } .pvit span { font-size: 12.5px; line-height: 1.2; } .pvit small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pit { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 7px 8px; text-align: left; background: none; border: 0; border-radius: 10px; cursor: pointer; } .pit:hover { background: rgba(255,255,255,.05); }
+.pit .ic { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--c); display: flex; align-items: center; justify-content: center; background: rgba(6,9,13,.6); } .pit .ic svg { width: 18px; height: 18px; }
+.pit.hot .ic { background: color-mix(in srgb, var(--c) 28%, transparent); }
+.pit .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; } .pit .tx b { font-size: 15px; font-weight: 700; line-height: 1.2; } .pit .tx span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pit em { font-style: normal; font: 800 10.5px var(--f-mono); background: #39d98a; color: #04110a; border-radius: 4px; padding: 1px 5px; margin-left: 7px; vertical-align: 1px; }
+.pit time { flex: none; font: 500 12.5px var(--f-mono); color: var(--muted); }
+.pchips, .pacts { display: flex; flex-wrap: wrap; gap: 7px; }
+.pchips button, .pacts button, .pform button, .pmore { min-height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.05); font-size: 14px; font-weight: 600; cursor: pointer; }
+.pchips button[aria-pressed="true"], .pacts button[aria-pressed="true"] { border-color: var(--cyan); background: rgba(82,199,255,.16); }
+.pform { display: flex; gap: 8px; } .pform input { width: 92px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #0b1118; color: var(--text); font: 700 20px var(--f-mono); text-transform: uppercase; text-align: center; letter-spacing: .1em; } .pform button { background: var(--cyan); color: #04121c; border-color: var(--cyan); font-weight: 800; }
+.pchart { width: 100%; height: auto; display: block; } .pchart text { font: 500 9px var(--f-mono); fill: #8796a4; }
+.lg { display: inline-block; width: 14px; height: 8px; margin: 0 5px 0 0; vertical-align: 0; } .lg.bar { background: #52c7ff; border-radius: 2px; } .lg.dash { border-top: 2px dashed #8796a4; height: 0; margin-left: 12px; vertical-align: 3px; }
+.prow3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } .prow3 div { border-left: 2px solid var(--line); padding-left: 9px; } .prow3 b { display: block; font: 700 19px var(--f-mono); } .prow3 span { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.plink { background: none; border: 0; padding: 0; color: var(--cyan); font-weight: 700; text-decoration: underline; cursor: pointer; font-size: inherit; }
+.psince p { font-size: 16px; font-weight: 600; }
+.pcam { padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #0b1118; cursor: pointer; display: flex; flex-direction: column; text-align: left; } .pcam img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #0b1118; } .pcam.off img { display: none; } .pcam.off::before { content: "Camera offline right now"; padding: 22px 12px; color: var(--muted); font-size: 14px; }
+.pcam span { padding: 8px 12px 10px; font-size: 13px; color: var(--muted); } .pcam span b { display: block; font-size: 15px; color: var(--text); }
+/* straight into Live: the title screen is only a loading screen unless the address ends in #menu */
+#start.auto .modes, #start.auto .legend { display: none; }
+/* readable on a phone */
+@media (max-width: 899px) { .sh-body { font-size: 14.5px; } .sh-head h2 { font-size: 20px; } .sh-head .sub { font-size: 14px; } .fact b { font-size: 16px; } .fact span { font-size: 11.5px; } #ticker { height: 30px; font-size: 14.5px; } #ticker .src { font-size: 11px; } .act { font-size: 15px; min-height: 44px; } #areabar { font-size: 14px; } .tool { width: 44px; height: 44px; } }
 </style>
 
 <canvas id="gl"></canvas>
@@ -255,6 +304,8 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
   <div class="rail" id="causeRow" hidden></div>
   <div class="rail" id="toolRow"><button type="button" class="tool" id="tvBtn" hidden aria-pressed="false" aria-label="TV mode" title="TV mode (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="areaBtn" hidden aria-pressed="false" aria-label="My area (postal code)" title="My area: enter the first 3 characters of your postal code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></button><button type="button" class="tool" id="h24Btn" hidden aria-pressed="false" aria-label="Calls in the last 24 hours" title="Every real call in the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg></button><button type="button" class="tool" id="camBtn" aria-label="Director camera" title="Director camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/></svg></button><button type="button" class="tool" id="muteBtn" aria-label="Sound" title="Sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="muteWave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button></div>
 </div>
+<button type="button" id="pulse" hidden aria-label="What is happening in Scarborough right now"></button>
+<div id="now" hidden role="dialog" aria-label="Scarborough right now"></div>
 <div id="h24bar" hidden></div>
 <div id="areabar" hidden></div>
 <div id="sheet" hidden></div>
@@ -273,9 +324,9 @@ body.cine #ticker { top: calc(5vh + 34px) !important; }
 
 <div class="screen" id="start">
   <div class="panel">
-    <div class="kicker">CITY OF TORONTO · TRAFFIC OPERATIONS · SCARBOROUGH DESK</div>
+    <div class="kicker">UNOFFICIAL · BUILT FROM PUBLIC DATA · UPDATED EVERY FEW MINUTES</div>
     <h1 class="title">Gridlock<span>Scarborough</span></h1>
-    <p class="lede">Every street, signal and stop sign in Scarborough, with thousands of drivers making real trips. Things go wrong. Drivers reroute down side streets, neighbours get angry, and ambulances get stuck. Keep it moving.</p>
+    <p class="lede" id="lede">Scarborough, live. Every real police and fire call, road closure, TTC bus and traffic camera from the last 24 hours, on the real streets, with thousands of simulated drivers reacting to it all.</p>
     <div class="modes">
       <button class="mode live" id="goLive" type="button"><span class="tag">● LIVE DATA · RIGHT NOW</span><b>Scarborough right now</b><span>Real police and fire calls, real roadwork, real weather and TTC buses, pulled fresh when you open this. The cars are simulated. What happens to them is real.</span><span class="lstat" id="liveStat"><i class="dot"></i>Pulling live Toronto data…</span></button>
       <button class="mode" id="goReplay" type="button"><span class="tag">REPLAY · LAST 24 HOURS</span><b>Today, replayed</b><span>The last day of real calls, played back on the streets where they happened.</span></button>

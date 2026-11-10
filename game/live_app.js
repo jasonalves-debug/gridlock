@@ -26,7 +26,7 @@ function loadFeed(withStatic) {
     let snap; const builtIn = () => snap || (snap = (() => { try { return JSON.parse($('livesnap').textContent); } catch (e) { return {}; } })());
     if (feed) { LV.feed = feed; LV.src = src; } else if (!LV.feed && builtIn().live) { LV.feed = builtIn().live; LV.src = 'built-in'; }
     if (stat) { LV.stat = stat; LV.statSrc = ssrc; } else if (!LV.stat && builtIn().static) { LV.stat = builtIn().static; LV.statSrc = 'built-in'; }
-    updateLiveUI(); return LV.feed;
+    updateLiveUI(); try { pulseOnFeed(); } catch (e) { console.error(e); } return LV.feed;
   })());
 }
 const feedTime = () => LV.feed && Date.parse(LV.feed.incidents_generated || LV.feed.generated);
@@ -51,15 +51,15 @@ function worldInitFor(m, kind) { // m: shift | watch | whatif (live and replay r
 function replayStart(epoch0) { const now = Date.now() / 1000; const calls = (LV.feed && LV.feed.calls) || []; const first = calls.length ? Math.min(...calls.map(c => c.ts)) : now - 86400; return Math.max(now - 86400, first - 900) - epoch0; }
 async function liveAfterReady() { // real calls go in once the player is watching, so each one is seen arriving
   if (!LV.feed) return;
-  tvHooks(); setTimeout(areaAfterReady, 1200);
+  tvHooks(); areaAfterReady(); try { pulseAfterReady(); } catch (e) { console.error(e); }
   if (LV.kind) {
     const r = await cmd('liveFeed', { live: { calls: LV.feed.calls, hwy: LV.feed.hwy } }, { calls: true, buses: false });
     const spots = LV.ws ? LV.ws.spots.length : 0;
     if (LV.kind === 'live') setTimeout(() => DIR.say('anchor', ['a:open', 'a:live'], 2), 2500);
     toast('LIVE', LV.kind === 'live' ? `Real Scarborough, ${timeOf(Date.now() / 1000)}. ${r.calls ? countOnScene() + ' real calls on scene, ' : ''}${r.zonesOn || 0} work zones active, ${spots} reported road hazards${r.busRoutes ? ', ' + r.busRoutes + ' TTC routes running' : ''}.` : `Replaying the last 24 hours: ${r.queue} real calls coming up. Use ⏭ to skip ahead.`, 'var(--green)');
   }
-  // upstream refreshes every 5 min; check every 2 so new data lands within ~2 min. Buses: the relay caches the TTC feed for 20 s.
-  if (LV.kind === 'live' || (mode === 'watch' && !LV.kind)) { clearInterval(LV.timer); LV.timer = setInterval(liveRefresh, 2 * 60 * 1000); }
+  // upstream refreshes every 2.5 min; check every minute (and on returning to the tab) so new data lands within about a minute. Buses: the relay caches the TTC feed for 20 s.
+  if (LV.kind === 'live' || (mode === 'watch' && !LV.kind)) { clearInterval(LV.timer); LV.timer = setInterval(() => { if (!document.hidden) liveRefresh(); }, 60 * 1000); }
   if (LV.kind === 'live' && BUS_RELAY) { pollBuses(); setInterval(pollBuses, 20000); document.addEventListener('visibilitychange', () => { if (!document.hidden) pollBuses(); }); }
 }
 function countOnScene() { return incidents.filter(i => i.real && i.state !== 'cleared').length || 'Several'; }
@@ -207,7 +207,7 @@ function badge(c, x, y, icon, col, r, glow) {
 }
 const inView = p => p && p[0] > -30 && p[0] < innerWidth + 30 && p[1] > 40 && p[1] < innerHeight + 30;
 function liveOverlay(c) {
-  areaRing(c);
+  areaRing(c); pulseOverlay(c);
   const hits = LV.hits; hits.length = 0; if (!LV.ws) return; const ws = LV.ws, wl = LV.wl, wpp = cam.wpp, t = performance.now() / 1000;
   const hit = (sel, p) => hits.push({ sel, x: p[0], y: p[1] });
   // TTC subway shuttles: dashed route + chip
@@ -378,7 +378,8 @@ function worldSheetHtml(sel) {
         ago = age < 3600 ? Math.max(1, Math.round(age / 60)) + ' min ago' : (age / 3600).toFixed(1).replace(/\.0$/, '') + ' h ago';
       return head(t, H24COL[t], c.label || (t === 'police' ? 'Police call' : 'Fire call'), c.loc || 'Scarborough')
         + facts([[esc(when), 'Time'], [ago, 'How long ago'], [t === 'police' ? 'Police' + (c.div ? ' · ' + esc(String(c.div)) : '') : 'Fire', 'Responded']])
-        + body((c.units && c.units.length ? `Units: ${esc(c.units.join(', '))}. ` : '') + 'One of the real calls from the last 24 hours.', t === 'police' ? 'Toronto Police calls for service' : 'Toronto Fire active incidents'); }
+        + body((c.units && c.units.length ? `Units: ${esc(c.units.join(', '))}. ` : '') + 'One of the real calls from the last 24 hours.', t === 'police' ? 'Toronto Police calls for service' : 'Toronto Fire active incidents')
+        + `<div class="acts"><button class="act" type="button" data-share="c=${esc(c.id)}" data-title="${esc((c.label || 'Call') + (c.loc ? ' at ' + c.loc : '') + ', ' + when)}">Share this</button>${nearestCam(it.x, it.y) >= 0 ? `<button class="act" type="button" data-cam="${nearestCam(it.x, it.y)}">Nearest camera</button>` : ''}</div>`; }
     case 'blk': { const [, x, y, n, routes, mins, road] = it, ci = nearestCam(x, y);
       return head('bus', '#ff7a00', 'Possible blockage', road || 'Scarborough') + facts([[n, 'Buses stopped'], [mins + ' min', 'Not moving'], [esc(routes), 'Routes']])
         + body(`${n} real TTC buses have been stopped here for ${mins} minutes, away from any station or end of the line. That usually means something is blocking the road (a crash, a stalled vehicle, police activity) before it shows up in any official feed. Cars here are slowed down while it lasts.`, 'TTC live bus GPS, read by GRIDLOCK')
@@ -412,7 +413,7 @@ function liveSourcesHtml() {
   const row = ([k, label, which]) => { const v = (which === 'live' ? stl : sts)[k]; const ok = /^live/.test(v || ''), kept = /kept last good/.test(v || ''); return `<span>${label}</span><b class="${ok ? 'good' : kept ? 'warn' : v ? 'bad' : ''}" title="${esc(v || '')}">${ok ? '✓ ' + (v.replace(/^live\s*\(?|\)$/g, '').split(/[ ,]/)[0] || '') : v && /^off/.test(v) ? 'off' : kept || (v && /^stale/.test(v)) ? '✓ last copy' : v ? 'unavailable' : '—'}</b>`; };
   return head('traffic', 'var(--green)', 'Live data', f ? `${LV.src === 'live' ? 'Fetched just now' : LV.src === 'saved' ? 'Using the last saved copy' : 'Using the copy built into this file'} · data from ${age} min ago${LV.statSrc !== 'live' ? ` · daily data: ${LV.statSrc === 'saved' ? 'saved copy' : 'built-in copy'}` : ''}` : 'No data')
     + `<div class="rep" style="font-size:13px">${SOURCES.map(row).join('')}<span>TTC live bus GPS</span><b class="${RB.at && Date.now() - RB.at < 120000 ? 'good' : RB.err ? 'bad' : ''}">${RB.at && Date.now() - RB.at < 120000 ? '✓ ' + RB.n : RB.err ? 'unavailable' : LV.kind === 'live' ? '—' : 'Live mode only'}</b></div>`
-    + body(`Cars are simulated. What happens to them is real: calls, roadwork, digs, 311 reports, TTC alerts and weather are collected every 5 minutes and checked here every 2 minutes; bus GPS every 20 seconds; camera photos every minute. Timetables, cameras, schools, towers, building sites and the census are refreshed daily.${LV.err ? `<br><span style="color:var(--muted)">Last fetch problem: ${esc(LV.err)}</span>` : ''}`);
+    + body(`Cars are simulated. What happens to them is real: calls, roadwork, digs, 311 reports, TTC alerts and weather are collected every 2.5 minutes and checked here every minute; bus GPS every 20 seconds; camera photos every minute. Timetables, cameras, schools, towers, building sites and the census are refreshed daily.${LV.err ? `<br><span style="color:var(--muted)">Last fetch problem: ${esc(LV.err)}</span>` : ''}`);
 }
 // ---------------- My area: type the first three characters of a postal code. The camera flies there, a ring marks the area,
 // and a panel counts what is going on inside it right now. Remembered between visits.
@@ -430,7 +431,7 @@ function areaSet(raw, fly = true) {
   const g = areaGeom(code);
   if (!g) { AREA.msg = `${code} isn't in the Scarborough map. Try: ${areaCodes().join(' ')}`; areaBar(); return false; }
   AREA.fsa = code; AREA.g = g; AREA.edit = false; AREA.msg = ''; store.set('myfsa', code); areaBar();
-  if (fly) { DIR.hold(90000); flyTo(g.x, g.y, Math.min(4400, Math.max(1700, g.r * 3))); }
+  if (fly) { AREA.ringT = performance.now() + 45000; DIR.hold(90000); flyTo(g.x, g.y, Math.min(4400, Math.max(1700, g.r * 3))); }
   return true;
 }
 function areaStats() {
@@ -456,7 +457,7 @@ function areaBar() {
     + `<div class="areaact">${s.cams.length ? `<button type="button" data-cam="${s.cams[0].i}">Nearest camera</button>` : ''}<button type="button" data-area="edit">Change</button><button type="button" data-area="close" aria-label="Close">×</button></div>`;
 }
 function areaRing(c) {
-  if (!AREA.open || !AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
+  if (!(AREA.open || performance.now() < (AREA.ringT || 0)) || !AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
   const rx = Math.hypot(q[0] - p[0], q[1] - p[1]), ry = Math.hypot(q2[0] - p[0], q2[1] - p[1]); if (rx < 30) return; // too far out: the ring would be a speck
   c.save(); c.setLineDash([8, 8]); c.lineDashOffset = -performance.now() / 80; c.strokeStyle = 'rgba(82,199,255,.8)'; c.fillStyle = 'rgba(82,199,255,.05)'; c.lineWidth = 2;
   c.beginPath(); c.ellipse(p[0], p[1], rx, ry, 0, 0, 7); c.fill(); c.stroke(); c.restore();

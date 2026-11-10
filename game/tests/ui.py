@@ -3,7 +3,7 @@ Screenshots go to shots/<mode>_<view>_*.png; page errors are printed at the end.
 import asyncio, json, sys
 from playwright.async_api import async_playwright
 
-import os; URL = 'file://' + os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'out', 'gridlock.html'))
+import os; URL = 'file://' + os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'out', 'gridlock.html')) + '#menu'  # the page opens straight into Live unless asked for the menu
 VIEW = sys.argv[1] if len(sys.argv) > 1 else 'desk'
 MODE = sys.argv[2] if len(sys.argv) > 2 else 'live'
 FAKE = sys.argv[3] if len(sys.argv) > 3 else None

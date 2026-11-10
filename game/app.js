@@ -605,7 +605,11 @@ $('goTv').onclick = () => { try { document.documentElement.requestFullscreen(); 
 if (location.hash === '#tv') { $('goTv').classList.add('first'); $('goTv').scrollIntoView({ block: 'center' }); }
 $('liveBadge').onclick = () => { selection = { k: 'live', id: 0 }; renderSheet(true); snd('ui'); };
 $('skipBtn').onclick = async () => { const r = await cmd('jumpNext'); if (r && r.ok === false) toast('REPLAY', r.msg, 'var(--muted)'); snd('ui'); };
+addEventListener('pointerdown', () => { if (AC && AC.state === 'suspended') AC.resume(); }, true); // sound starts on the first touch when Live opened by itself
 if (store.get('autostart', null) === 'whatif') { store.set('autostart', null); setTimeout(() => begin('whatif'), 50); }
+if (/^https?:$/.test(location.protocol)) for (const [rel, href] of [['manifest', 'manifest.webmanifest'], ['apple-touch-icon', 'icon-192.png']]) { const l = document.createElement('link'); l.rel = rel; l.href = href; document.head.appendChild(l); } // hosted copy: can be added to a phone's home screen
+// Straight into Live: no menu in the way. #menu shows the other modes; #tv waits for a tap (fullscreen needs one).
+else if (BOOT !== 'menu' && BOOT !== 'tv') { $('start').classList.add('auto'); setTimeout(() => begin('live'), 50); }
 
 // ---------------------------------------------------------------- main loop
 resize(); fitView(false); addEventListener('resize', () => { resize(); });
@@ -633,5 +637,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { get LV() { return LV; }, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { get LV() { return LV; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();
