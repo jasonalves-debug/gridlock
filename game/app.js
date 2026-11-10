@@ -607,7 +607,6 @@ $('liveBadge').onclick = () => { selection = { k: 'live', id: 0 }; renderSheet(t
 $('skipBtn').onclick = async () => { const r = await cmd('jumpNext'); if (r && r.ok === false) toast('REPLAY', r.msg, 'var(--muted)'); snd('ui'); };
 addEventListener('pointerdown', () => { if (AC && AC.state === 'suspended') AC.resume(); }, true); // sound starts on the first touch when Live opened by itself
 if (store.get('autostart', null) === 'whatif') { store.set('autostart', null); setTimeout(() => begin('whatif'), 50); }
-if (/^https?:$/.test(location.protocol)) for (const [rel, href] of [['manifest', 'manifest.webmanifest'], ['apple-touch-icon', 'icon-192.png']]) { const l = document.createElement('link'); l.rel = rel; l.href = href; document.head.appendChild(l); } // hosted copy: can be added to a phone's home screen
 // Straight into Live: no menu in the way. #menu shows the other modes; #tv waits for a tap (fullscreen needs one).
 else if (BOOT !== 'menu' && BOOT !== 'tv') { $('start').classList.add('auto'); setTimeout(() => begin('live'), 50); }
 

@@ -2,7 +2,7 @@
 // One line at the bottom-left says how busy Scarborough is and what just happened. Tap it for the full picture: what changed
 // since your last visit, what is happening near your postal code, how today compares with a normal day, and a feed of every
 // real event from the last 24 hours. Everything here is read from the same public data the map uses; nothing is simulated.
-const SITE = 'https://jasonalves-debug.github.io/gridlock/'; // where shared links point when this file is opened from disk
+const SITE = 'https://jasonalves-debug.github.io/gallery/gridlock.html'; // where shared links point when this file is opened from disk
 const PULSE = { open: false, filter: 'all', prev: store.get('lastSeen', 0), known: null, fresh: new Set(), unseen: 0, notify: store.get('notify', false),
   cache: null, key: '', focus: null, more: false, hidAt: 0, visits: store.get('visits', 0), flash: 0 };
 const P_COL = { police: '#52c7ff', fire: '#ff8a1f', medical: '#ff4f6d', road: '#ffb020', ttc: '#ff4b4b', wx: '#7aa7ff' };
