@@ -34,7 +34,7 @@ function tvLead() { // leader line from the docked info card to the clicked item
 }
 requestAnimationFrame(tvLead);
 function tvHoldSel() { // while a card is open keep the camera on it, then let it go after a while so an unattended TV never gets stuck
-  if (!TV.on || !selection || $('sheet').hidden) { TVD.selSig = ''; return; }
+  if (!TV.on || !selection || $('sheet').hidden || BRK.cur) { TVD.selSig = ''; return; }
   const sig = JSON.stringify(selection); if (sig !== TVD.selSig) { TVD.selSig = sig; TVD.selAt = performance.now(); }
   if (performance.now() - TVD.selAt > 45000) { closeSheet(); return; } DIR.hold(0);
 }

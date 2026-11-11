@@ -423,6 +423,7 @@ function buildSprites(dt) {
   liveSpritesA(put);
   for (const i of act) if (i.type === 'hwy' && i.blocks) for (const b of i.blocks) { const p = pts(b.e); const tot = G.len[b.e]; const pos = posAlong(p, Math.max(2, b.s - 28)); const pos2 = posAlong(p, Math.min(tot, b.s + 1)); const ang = Math.atan2(pos2[1] - pos[1], pos2[0] - pos[0]); put(pos[0], pos[1], 0.3, G.lanes[b.e] * 1.8 + 1.5, 6, 1, 6, -(ang + Math.PI / 2)); }
   DIR.heliSprites(put, 'shadow');
+  brkSpritesA(put);
   const aN = n;
   // B: additive
   const t = performance.now() / 1000;
@@ -435,7 +436,7 @@ function buildSprites(dt) {
     if (i.type === 'power' && i.state === 'working') put(i.x, i.y, 1, 14, 2, 1, 10, 0);
   }
   for (const s of signs) { if (simT - s.t > 1200) continue; put(s.x, s.y, 1, 9, 2, 0.8 + 0.4 * Math.sin(t * 4), 9, 0); }
-  liveSpritesB(put);
+  liveSpritesB(put); brkSpritesB(put, dt);
   for (const p of spray) { p.a += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vz -= 18 * dt; put(p.x, p.y, Math.max(0, p.z), 1.2, 8, 1 - p.a / p.life, 2, 0); }
   spray = spray.filter(p => p.a < p.life);
   if (selection) { const p = selPos(selection); if (p) put(p[0], p[1], 0.6, selection.k === 'hood' ? 700 : 40, 11, 1, 40, 0); }
@@ -643,5 +644,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { brkTest: k => brkTest(k), brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();

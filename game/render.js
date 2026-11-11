@@ -346,7 +346,7 @@ function buildPrograms() {
         if (vType == 7 || vType == 3) b = vec3(1.0, 0.92, 0.85);
         if (vType >= 4 && vType <= 6) { a = vec3(1.0, 0.55, 0.05); b = vec3(1.0, 0.75, 0.2); }
         vec3 sc = mix(a, b, strobe) * flick;
-        col += sc * (halo * 2.4 + wash * 0.9);
+        col += sc * (halo * 2.4 + wash * 0.9) * clamp(uWpp * 7.0, 0.2, 1.0); // glow shrinks when the camera is close so it doesn't blow out the scene
       }
       o = vec4(col, 1.0); }`);
   P.sprite = prog(`layout(location=0) in vec2 aQ; layout(location=1) in vec4 aI; layout(location=2) in vec4 aJ; ${CAM_U} out vec2 vQ; flat out int vK; out float vA; out float vT; out float vSeed;
@@ -355,6 +355,7 @@ function buildPrograms() {
       vec3 p = c + vec3(q * size, 0.0); gl_Position = uVP * vec4(p, 1.0); vQ = aQ; vK = k; vA = aJ.y; vT = uTime; vSeed = fract(aI.x * 0.013 + aI.y * 0.007); }`,
     `in vec2 vQ; flat in int vK; in float vA; in float vT; in float vSeed; ${CAM_U} out vec4 o;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float sdSeg(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)); }
     float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hash(i), hash(i + vec2(1,0)), f.x), mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y); }
     void main(){ float d = length(vQ); vec4 c = vec4(0.0);
       if (vK == 0) { // fire
@@ -394,6 +395,27 @@ function buildPrograms() {
         vec3 coat = vSeed < 0.3 ? vec3(0.8, 0.2, 0.15) : vSeed < 0.55 ? vec3(0.15, 0.35, 0.75) : vSeed < 0.75 ? vec3(0.9, 0.75, 0.2) : vec3(0.75, 0.75, 0.78);
         float body = smoothstep(1.0, 0.8, length(vQ / vec2(0.7, 1.0))), head = smoothstep(0.45, 0.35, d);
         c = vec4(mix(coat, vec3(0.12, 0.09, 0.07), head) * mix(0.55, 1.0, uDay), max(body, head) * vA); }
+      else if (vK >= 24 && vK <= 29) { // people from above (alpha), facing +x: 24 officer, 25 hands up, 26 firefighter, 27 cuffed, 28 paramedic, 29 bystander
+        vec2 q = vQ; vec2 h1 = vec2(0.30, 0.58), h2 = vec2(0.30, -0.58);
+        if (vK == 24) { h1 = vec2(0.46, 0.36); h2 = vec2(0.46, -0.36); } else if (vK == 25) { h1 = vec2(0.66, 0.78); h2 = vec2(0.66, -0.78); }
+        else if (vK == 27) { h1 = vec2(-0.42, 0.10); h2 = vec2(-0.42, -0.10); } else if (vK == 26) { h1 = vec2(0.74, 0.14); h2 = vec2(0.50, -0.24); }
+        float torso = 1.0 - smoothstep(0.0, 0.07, length(q / vec2(0.32, 0.62)) - 1.0);
+        float arms = 1.0 - smoothstep(0.0, 0.07, min(sdSeg(q, vec2(0.0, 0.54), h1), sdSeg(q, vec2(0.0, -0.54), h2)) - 0.12);
+        float head = 1.0 - smoothstep(0.0, 0.07, length(q - vec2(0.03, 0.0)) - (vK == 26 ? 0.32 : 0.25));
+        float hand = max(1.0 - smoothstep(0.0, 0.05, length(q - h1) - 0.11), 1.0 - smoothstep(0.0, 0.05, length(q - h2) - 0.11));
+        vec3 cloth = vec3(0.07, 0.12, 0.30), hc = vec3(0.03, 0.05, 0.12);
+        if (vK == 25 || vK == 27) { cloth = vec3(0.50, 0.51, 0.54); hc = vec3(0.30, 0.2, 0.14); }
+        else if (vK == 26) { cloth = vec3(0.80, 0.62, 0.10); hc = vec3(0.98, 0.82, 0.08); }
+        else if (vK == 28) { cloth = vec3(0.16, 0.62, 0.34); hc = vec3(0.12, 0.09, 0.07); }
+        else if (vK == 29) { cloth = vSeed < 0.3 ? vec3(0.8, 0.2, 0.15) : vSeed < 0.55 ? vec3(0.15, 0.35, 0.75) : vSeed < 0.75 ? vec3(0.9, 0.75, 0.2) : vec3(0.75, 0.75, 0.78); hc = vec3(0.13, 0.09, 0.07); }
+        vec3 col = mix(cloth, hc, head); col = mix(col, cloth * 0.8, arms * (1.0 - head) * (1.0 - torso));
+        if (vK == 24) col = mix(col, vec3(0.9, 0.92, 0.95), step(abs(q.y), 0.55) * step(abs(q.x + 0.12), 0.05) * torso * (1.0 - head)); // reflective back stripe / shoulder number
+        if (vK == 26) col = mix(col, vec3(0.95, 0.95, 0.9), step(abs(q.y), 0.6) * step(abs(q.x + 0.14), 0.045) * torso * (1.0 - head)); // turnout-coat reflective band
+        col = mix(col, vec3(0.86, 0.66, 0.52), hand * (vK == 26 ? 0.0 : 1.0));
+        if (vK == 27) col += vec3(0.8) * (1.0 - smoothstep(0.0, 0.06, length(q - vec2(-0.42, 0.0)) - 0.07)); // cuffs
+        col *= mix(0.62, 1.12, uDay);
+        float m = max(max(torso, arms), max(head, hand)); col *= mix(0.45, 1.0, smoothstep(0.0, 0.9, m + (1.0 - d) * 0.3));
+        c = vec4(col, m * vA); }
       else if (vK == 13) { // helicopter body (top view), x = nose
         vec2 q = vQ; float cab = length(q / vec2(0.42, 0.24)) - 1.0; float boom = max(abs(q.y) - 0.05, max(-q.x - 0.95, q.x + 0.1));
         float fin = max(abs(q.y) - 0.16, abs(q.x + 0.92) - 0.05); float skid = max(abs(abs(q.y) - 0.22) - 0.025, abs(q.x - 0.02) - 0.3);

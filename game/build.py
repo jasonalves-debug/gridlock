@@ -16,7 +16,7 @@ def graph():
 
 # simulation worker: sim.js with the world modules spliced in at its /*__WORLD__ a.js b.js */ marker
 sim = re.sub(r'/\*__WORLD__ ([^*]+)\*/', lambda m: '\n'.join(read(f) for f in m.group(1).split()), read('sim.js'))
-app = read('app.js').replace('/*__DIRECTOR__*/', read('director.js')).replace('/*__LIVEAPP__*/', read('live_app.js') + '\n' + read('pulse.js') + '\n' + read('tvdesk.js'))
+app = read('app.js').replace('/*__DIRECTOR__*/', read('director.js')).replace('/*__LIVEAPP__*/', read('live_app.js') + '\n' + read('pulse.js') + '\n' + read('tvdesk.js') + '\n' + read('brk.js'))
 
 # voice: base clips, then every data/voiceN.json on top (later files win)
 V = {'clips': {}, 'dur': {}, 'cap': {}}

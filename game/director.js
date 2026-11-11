@@ -161,6 +161,7 @@ const DIR = (function () {
     if (tv && s.x != null && s.type !== 'follow' && s.type !== 'chopper') { if (Math.hypot(s.x - cam.x, s.y - cam.y) > 2500) dipCut(s); else whoosh(0.025); }
     if (s.anchor && !broadcastSeen.has(s.anchorKey)) { broadcastSeen.add(s.anchorKey); say('anchor', s.anchor, 3); }
     if (AC && !muted && s.sting) sting();
+    if (tv && s.sting) brkOverlay(s);
   }
   function cineOff() { document.body.classList.remove('cine'); $('bcast').hidden = true; $('bcPip').hidden = true; pipCam = null; $('tvboard').classList.remove('on'); }
   // TV cut: a long move dips to black and lands near the next shot, the way a broadcast cuts between cameras
@@ -275,7 +276,8 @@ const DIR = (function () {
         else if (i.type === 'call') { const big = i.act === 'police_crit' || i.act === 'fire_struct' || i.act === 'gas'; const lab = 'l:' + (i.label || 'Police incident');
           const head = i.src === 'tfs' ? ['d:respfire', ...((i.real && i.real.units) || []).slice(0, 2).map(u => 'p:' + u).filter(k => VOICE.clips[k])] : [division(i.x, i.y), i.act === 'police_low' || i.act === 'missing' ? 'd:routine' : 'd:priority'];
           say('radio', [...head, lab, ...crossKeys(i.name)], big ? 3 : 1, i.src === 'tfs' ? 'FIRE DISPATCH' : 'DISPATCH');
-          if (big) { spawnHeli('news', i); requestShot({ type: 'orbit', x: i.x, y: i.y, h: 380, dur: 8, pri: 2, title, sub, anchor: ['a:open', i.act === 'police_crit' ? 'a:policeop' : i.act === 'gas' ? 'a:gas' : 'a:firescene', 'a:avoid'], anchorKey: 'call' + i.id, sting: true }); } }
+          const bk = tv ? brkClass(i) : null; if (bk) { spawnHeli('news', i); brkTrigger(i, bk, title, sub); }
+          else if (big) { spawnHeli('news', i); requestShot({ type: 'orbit', x: i.x, y: i.y, h: 380, dur: 8, pri: 2, title, sub, anchor: ['a:open', i.act === 'police_crit' ? 'a:policeop' : i.act === 'gas' ? 'a:gas' : 'a:firescene', 'a:avoid'], anchorKey: 'call' + i.id, sting: true }); } }
         else if (i.type === 'flood') { const road = rk(i.name); say('radio', ['d:dispatch', 'd:flood', road ? 'd:on' : null, road], 1); }
         break; }
       case 'respDispatched': if (e.first && i && bigInc(i)) { say('radio', ['u:copy'], 2, e.kind === 'opp' ? 'OPP' : e.kind === 'fire' ? 'FIRE' : e.kind === 'ems' ? 'EMS' : 'POLICE');
@@ -341,9 +343,10 @@ const DIR = (function () {
       if (!speaking && !speechQ.length && !(shot && shot.board)) { const n = 1 + ((Math.random() * 7) | 0); if (has('c:' + n + 'a')) { say('chatter', ['c:' + n + 'a'], 0, ''); say('chatter', ['c:' + n + 'b'], 0, ''); } } }
     if (pipCam && shot && performance.now() - pipT > 45000) { const c = camNear && camNear(shot.x, shot.y); pipT = performance.now(); if (c) $('bcPipImg').src = c.url; } const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
   function hold(ms) { if (shot) endShot(true); shotQ = []; lastUser = performance.now() + ms; } // pause the auto camera, e.g. after the viewer picks their own area
+  function cut(s) { if (!tv || !autoCam || !ready || ended || performance.now() - lastUser < 15000) return false; if (shot) { shot = null; cineOff(); } shotQ = []; startShot(s); return true; } // breaking news: straight to air, over whatever is showing
   function userInput() { lastUser = performance.now(); if (shot) endShot(true); }
   $('bcBack').onclick = () => endShot(true);
   $('camBtn').setAttribute('aria-pressed', String(autoCam));
   $('camBtn').onclick = () => { autoCam = !autoCam; store.set('autocam', autoCam); $('camBtn').setAttribute('aria-pressed', String(autoCam)); if (!autoCam) { endShot(true); } toast('CAMERA', autoCam ? 'Director camera on. It will cut to big moments.' : 'Director camera off.', 'var(--cyan)'); };
-  return { incTitle, get seg() { return segName; }, setTV(v) { tv = v; crawlX = 0; first = true; runI = -1; runLeft = 0; lastBoard = performance.now() - 240000; const cr = $('tvCrawl'); if (cr) cr.textContent = ''; if (v) setSeg('SCARBOROUGH LIVE'); if (!v) { shotQ = []; if (shot) endShot(true); } }, set tourSource(f) { tourSource = f; }, set mapOk(f) { mapOk = f; }, set camNear(f) { camNear = f; }, set tvStats(f) { tvStats = f; }, set boardSource(f) { boardSource = f; }, has, voDur, onEvent, onSlow, frame, heliSprites, userInput, hold, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
+  return { incTitle, get seg() { return segName; }, setTV(v) { tv = v; crawlX = 0; first = true; runI = -1; runLeft = 0; lastBoard = performance.now() - 240000; const cr = $('tvCrawl'); if (cr) cr.textContent = ''; if (v) setSeg('SCARBOROUGH LIVE'); if (!v) { shotQ = []; if (shot) endShot(true); } }, set tourSource(f) { tourSource = f; }, set mapOk(f) { mapOk = f; }, set camNear(f) { camNear = f; }, set tvStats(f) { tvStats = f; }, set boardSource(f) { boardSource = f; }, has, voDur, onEvent, onSlow, frame, heliSprites, userInput, hold, cut, audioReady, say, get pressure() { return pressure; }, get shot() { return shot; }, requestShot, set auto(v) { autoCam = v; }, helis };
 })();

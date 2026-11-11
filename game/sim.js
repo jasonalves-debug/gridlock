@@ -612,7 +612,7 @@ function createSim(G, opts) {
   }
   function stepOnScene() {
     for (const u of specials) {
-      if (u.state !== 'onscene') continue; const inc = incidents.find(x => x.id === u.inc);
+      if (u.state !== 'onscene' || u.prop) continue; const inc = incidents.find(x => x.id === u.inc);
       if (!inc || inc.state === 'cleared') { goHome(u); continue; }
       if (u.kind === 'fire' && inc.fire && simT - u.onT > 150) { inc.fire = false; ev({ k: 'fireOut', id: inc.id, inc: pubInc(inc) }); }
       if (u.kind === 'ems' && simT - u.onT > 300 && !u.transport) { u.transport = true; u.state = 'done'; const hosp = G.places.filter(p => p.t === 'hospital'); let h = hosp[0], bd = 1e18; for (const p of hosp) { const d = (p.x - u.x) ** 2 + (p.y - u.y) ** 2; if (d < bd) { bd = d; h = p; } }
@@ -645,6 +645,7 @@ function createSim(G, opts) {
       const u = specials[i];
       if (u.state === 'working' && u.kind === 'police' && simT >= u.until) { ctrlPolice[u.ctrl] = 0; pool.police++; u.state = 'done'; ev({ k: 'policeOff', ctrl: u.ctrl, name: ctrlName(u.ctrl) }); }
       if (u.state === 'working' && u.inc && !u.responder) { const inc = incidents.find(x => x.id === u.inc); if (!inc || inc.state === 'cleared') { u.state = 'done'; pool[u.kind]++; } else if (simT >= inc.workUntil) { clearIncident(inc, 'crew'); u.state = 'done'; pool[u.kind]++; } }
+      if (u.prop && simT >= u.until) u.state = 'done';
       if (u.state === 'arrived' && u.kind === 'ems') { u.state = 'done'; }
       if (u.state === 'done' || u.state === 'returning') specials.splice(i, 1);
     }
@@ -787,6 +788,7 @@ function createSim(G, opts) {
     cutEdges(out) { for (let e = 0; e < E; e++) out[e] = eCls[e] === CLS_RES ? Math.min(255, Math.round(hoodCutEdge[e] * 3)) : 0; return out; },
     step, treesTick, writePositions, edgeSpeeds, signalStates, summary, posOnEdge, laneLat, nearestEdge,
     init() { updateCosts(false); for (let d = 0; d < ND; d++) { if (D[d].kind === 'special') continue; buildTree(d, costHab, nextHab, distHab); } updateCosts(true); for (let d = 0; d < ND; d++) if (D[d].kind !== 'special') buildTree(d, costLive, nextLive, distLive); if (mode === 'shift' && !opts.noIncidents) setupShift(); },
+    addProps(list, secs) { for (const p of list) specials.push({ id: unitSeq++, kind: p.kind, d: -1, e: 0, s: 0, v: 0, x: p.x, y: p.y, ang: p.ang, state: 'onscene', t0: simT, onT: simT, prop: true, until: simT + secs }); return list.length; }, // breaking-news scenes: parked emergency vehicles that leave by themselves
     setTargetCars(n) { targetCars = n; }, setTime(t) { simT = t; }, setMode(m, prof) { mode = m; if (prof) whatifProfile = prof; },
     dispatch, sendPolice, recallPolice,
     setSplit(ctl, split) { ctrlSplit[ctl] = Math.max(0.2, Math.min(0.8, split)); ev({ k: 'retimed', ctrl: ctl, name: ctrlName(ctl), split: ctrlSplit[ctl] }); return { ok: true }; },
