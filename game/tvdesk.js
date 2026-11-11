@@ -22,4 +22,21 @@ function tvDesk() {
   tvPut('tvLatest', items.length ? items.map(it => `<div class="tl${now - it.t < 900 || PULSE.fresh.has(it.id) ? ' new' : ''}" style="--c:${P_COL[it.kind]}"><i>${svg(P_ICON[it.kind], P_COL[it.kind])}</i><div><b>${esc(it.title)}</b><span>${esc(it.sub)}</span></div><time>${ago(now - it.t).replace(' ago', '').replace('just now', 'now')}</time></div>`).join('') : '<p class="none">Nothing reported in the last 24 hours.</p>');
   tvRailCam(false);
 }
+function tvLead() { // leader line from the docked info card to the clicked item
+  requestAnimationFrame(tvLead); const sv = $('tvLead'), sh = $('sheet'); if (!sv) return;
+  const big = document.body.classList.contains('tvbig'), on = big && selection && !sh.hidden;
+  if (big) { const g = on ? 0.62 : 0.26; R.cam.ox += (g - R.cam.ox) * 0.07; if (Math.abs(g - R.cam.ox) < 0.002) R.cam.ox = g; } // card open: the item sits in the left part of the picture, clear of the card
+  if (!on) { sv.classList.remove('on'); return; }
+  const w = selPos(selection), p = w && R.project(w[0], w[1], 0), r = sh.getBoundingClientRect(), top = innerHeight * 0.064, right = innerWidth * 0.74;
+  if (!p || p[0] < 0 || p[0] > right || p[1] < top || p[1] > innerHeight * 0.8) { sv.classList.remove('on'); return; }
+  const x0 = r.left, y0 = r.top + Math.min(r.height / 2, 46), q = (id, o) => { const e = $(id); for (const k in o) e.setAttribute(k, o[k]); };
+  q('tvLeadL', { x1: x0, y1: y0, x2: p[0], y2: p[1] }); q('tvLeadR', { cx: p[0], cy: p[1] }); q('tvLeadD', { cx: p[0], cy: p[1] }); sv.classList.add('on');
+}
+requestAnimationFrame(tvLead);
+function tvHoldSel() { // while a card is open keep the camera on it, then let it go after a while so an unattended TV never gets stuck
+  if (!TV.on || !selection || $('sheet').hidden) { TVD.selSig = ''; return; }
+  const sig = JSON.stringify(selection); if (sig !== TVD.selSig) { TVD.selSig = sig; TVD.selAt = performance.now(); }
+  if (performance.now() - TVD.selAt > 45000) { closeSheet(); return; } DIR.hold(0);
+}
+setInterval(tvHoldSel, 1000);
 setInterval(tvDesk, 1000);

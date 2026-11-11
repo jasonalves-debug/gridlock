@@ -299,6 +299,12 @@ body.tvbig #tvrail { position: fixed; z-index: 11; right: 0; top: 6.4vh; bottom:
 .tl.new b::after { content: "NEW"; font: 800 1.2vh var(--f-mono); background: #39d98a; color: #04110a; border-radius: 3px; padding: .15vh .6vh; margin-left: .8vh; vertical-align: .3vh; } #tvrail .none { font-size: 1.8vh; color: #8fa1b3; margin: 0; }
 #tvNext { display: flex; flex-wrap: wrap; gap: .5vh 1.6vh; } #tvNext > div { display: flex; align-items: center; gap: .8vh; font-size: 1.75vh; font-weight: 700; letter-spacing: .04em; color: #c9d3dd; white-space: nowrap; } #tvNext i { font: 800 1.35vh var(--f-mono); font-style: normal; width: 2.3vh; height: 2.3vh; display: flex; align-items: center; justify-content: center; background: #1a222c; color: #8fa1b3; }
 body.tvbig #bcast .lower { right: 26vw; } body.tvbig #bcast .lt, body.tvbig #bcast .ls { max-width: calc(74vw - 4.4vw); } body.tvbig #bcast .pip { display: none !important; } body.tvbig .vig { right: 26vw; top: 6.4vh; }
+/* TV mode: a clicked item's info card docks top-right of the picture (never under the rail) with a leader line to the item */
+body.tvbig { --z: 1.2; } @media (min-height: 1000px) { body.tvbig { --z: 1.5; } } @media (min-height: 1500px) { body.tvbig { --z: 2.1; } } @media (min-height: 2000px) { body.tvbig { --z: 2.9; } }
+body.tvbig #sheet { zoom: var(--z); left: auto; bottom: auto; right: calc((26vw + 1.6vh) / var(--z)); top: calc(15.4vh / var(--z)); width: calc(27vw / var(--z)); max-height: calc((100vh - 15.4vh - 26vh) / var(--z)); border-radius: 12px; border: 1px solid rgba(255,255,255,.18); border-top: 4px solid #d7141a; z-index: 13; box-shadow: 0 10px 40px rgba(0,0,0,.55); animation: tvcard .35s cubic-bezier(.2,.8,.2,1); }
+@keyframes tvcard { from { transform: translateX(24px); opacity: 0; } }
+#tvLead { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 12; pointer-events: none; display: none; } body.tvbig #tvLead.on { display: block; }
+#tvLead line { stroke: #fff; stroke-width: 2; stroke-dasharray: 7 5; opacity: .85; filter: drop-shadow(0 0 3px #000); } #tvLead circle { fill: none; stroke: #ffd23f; stroke-width: 3; filter: drop-shadow(0 0 4px #000); } #tvLead circle.d { fill: #ffd23f; stroke: none; } #tvLead circle.r { animation: tvping 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; } @keyframes tvping { from { transform: scale(.6); opacity: 1; } to { transform: scale(1.9); opacity: 0; } }
 body.tvbig #tvboard { top: calc(6.4vh + 3vh); left: 2.2vw; zoom: 1.15; } @media (min-height: 1000px) { body.tvbig #tvboard { zoom: 1.45; } } @media (min-height: 1500px) { body.tvbig #tvboard { zoom: 2; } } @media (min-height: 2000px) { body.tvbig #tvboard { zoom: 2.8; } }
 body.tvbig #tvbar .clk { display: none; } body.tvbig #ticker { top: calc(6.4vh + 1.4vh) !important; left: 2.2vw !important; max-width: 60vw; } body.tvbig #tvExit { top: calc(6.4vh + 1.2vh); left: auto; right: calc(26vw + 1.4vh); font-size: max(13px, 1.8vh); }
 body.tv #tvExit { top: 8px; }
@@ -336,6 +342,7 @@ body.tv #tvExit { top: 8px; }
 <div id="now" hidden role="dialog" aria-label="Scarborough right now"></div>
 <div id="h24bar" hidden></div>
 <div id="areabar" hidden></div>
+<svg id="tvLead" aria-hidden="true"><line id="tvLeadL" x1="0" y1="0" x2="0" y2="0"/><circle class="r" id="tvLeadR" r="16"/><circle class="d" id="tvLeadD" r="5"/></svg>
 <div id="sheet" hidden></div>
 <div class="vig" aria-hidden="true"></div>
 <div id="dip" aria-hidden="true"></div>
