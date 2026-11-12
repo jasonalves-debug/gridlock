@@ -5,7 +5,26 @@
 const BRK = { cur: null, q: [], seen: new Set(), emb: [], ot: 0 }, BRK_DUR = 28;
 const brkE = x => x * x * (3 - 2 * x), brkC = (x, a, b) => Math.min(1, Math.max(0, (x - a) / (b - a))), brkMix = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
 
-function brkClass(i) { // → null when it isn't breaking
+// the anchor names the street: "Police have made an arrest, | on Kingston Road, | near Galloway Road." from the call's location text
+// ("Kingston Rd & Galloway Rd", "Midland Ave - Eglinton Ave E"), matched to the street names that have anchor clips (voice pack 6)
+const BRK_AB = { ave: 'avenue', av: 'avenue', rd: 'road', st: 'street', dr: 'drive', blvd: 'boulevard', cres: 'crescent', crt: 'court', ct: 'court', pkwy: 'parkway', trl: 'trail', sq: 'square', pl: 'place', gt: 'gate', ln: 'lane', cir: 'circle', circ: 'circuit', ter: 'terrace', terr: 'terrace', hwy: 'highway', e: 'east', w: 'west', n: 'north', s: 'south', mt: 'mount' };
+let BRK_NM = null;
+const brkNorm = t => String(t).toLowerCase().replace(/[.'’]/g, '').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean).map(w => BRK_AB[w] || w).filter((w, k, a) => !(k === 0 && /^\d+[a-z]?$/.test(w) && a.length > 1)).join(' ');
+function brkStreet(part) {
+  if (!BRK_NM) { BRK_NM = new Map(); for (const n of G.names) if (DIR.has('ao:' + n)) { const k = brkNorm(n); BRK_NM.set(k, n); const k2 = k.replace(/ (east|west|north|south)$/, ''); if (!BRK_NM.has(k2)) BRK_NM.set(k2, n); } }
+  const k = brkNorm(part); return BRK_NM.get(k) || BRK_NM.get(k.replace(/ (east|west|north|south)$/, '')) || null;
+}
+function brkVO(b, i) {
+  if (!b) return b; const lead = { fire: 'a:lf', arrest: 'a:la', scene: 'a:lp' }[b.k]; if (!DIR.has(lead)) return b;
+  const loc = String((i.real && i.real.loc) || i.name || ''), found = [];
+  for (const part of loc.split(/\s+(?:&|-|\/|and|at)\s+/i)) { const n = brkStreet(part); if (n && !found.includes(n)) found.push(n); }
+  if (!found.length && i.edge != null && i.edge >= 0 && G.name[i.edge] >= 0) { const n = G.names[G.name[i.edge]]; if (DIR.has('an:' + n)) found.push(n); }
+  if (!found.length) return b;
+  const where = found.length > 1 ? ['ao:' + found[0], 'an:' + found[1]] : ['an:' + found[0]];
+  return Object.assign({}, b, { a: ['a:open', lead, ...where, 'a:golive', ...(b.a.includes('a:avoid') ? ['a:avoid'] : [])] });
+}
+function brkClass(i) { return brkVO(brkClass0(i), i); }
+function brkClass0(i) { // → null when it isn't breaking
   if (!i || i.type !== 'call' || i.synth) return null;
   const L = String(i.label || (i.real && i.real.label) || '').toLowerCase(), code = String((i.real && i.real.code) || '').toUpperCase();
   if (i.src === 'tfs') return i.act === 'fire_struct' ? { k: 'fire', tag: 'FIRE CREWS ON SCENE', a: ['a:open', 'a:brkfire', 'a:golive', 'a:avoid'] } : null;
