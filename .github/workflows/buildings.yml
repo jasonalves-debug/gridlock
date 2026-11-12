@@ -1,0 +1,28 @@
+name: Fetch Scarborough buildings (3D Massing)
+
+# One-off, run by hand: downloads the City of Toronto 3D Massing data, crops it to Scarborough and
+# publishes out/buildings.json on the `assets` branch, where the game's build script picks it up.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  buildings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyshp pyproj
+      - run: python collect/buildings.py
+      - name: Publish to the assets branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          idx=$(mktemp -u); GIT_INDEX_FILE=$idx git --work-tree=out add -A .
+          tree=$(GIT_INDEX_FILE=$idx git write-tree); commit=$(git commit-tree "$tree" -m "buildings $(date -u +%FT%TZ)")
+          git push --force origin "$commit:refs/heads/assets"
