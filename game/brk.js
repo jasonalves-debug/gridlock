@@ -30,8 +30,12 @@ function brkClass0(i) { // → null when it isn't breaking
   if (i.src === 'tfs') return i.act === 'fire_struct' ? { k: 'fire', tag: 'FIRE CREWS ON SCENE', a: ['a:open', 'a:brkfire', 'a:golive', 'a:avoid'] } : null;
   if (i.src !== 'tps') return null;
   if (code === 'ARR' || /\barrest/.test(L)) return { k: 'arrest', tag: 'POLICE MAKE AN ARREST', a: ['a:open', 'a:brkarrest', 'a:golive'] };
-  if (i.act === 'police_crit' || /shoot|shots|gun|stab|homicide|hostage|firearm|weapon/.test(L)) return { k: 'scene', tag: 'POLICE INVESTIGATE', a: ['a:open', 'a:brkpolice', 'a:golive', 'a:avoid'] };
-  if (/robbery|abduct/.test(L) || (/assault/.test(L) && /priority|progress|just/.test(L))) return { k: 'scene', tag: 'POLICE RESPOND', a: ['a:open', 'a:brkpolice', 'a:golive'] };
+  const WPN = /knife|knives|gun|stab|shoot|shots|gunshot|firearm|weapon|armed|machete|homicide|hostage/, BE = /break.{0,6}enter|break-?in|b\s?&\s?e/, SA = /assault/;
+  if (WPN.test(L) || /^(PERKN|PERGU|SOUGU)$/.test(code)) return { k: 'scene', tag: 'POLICE RESPOND · WEAPON REPORTED', a: ['a:open', 'a:brkpolice', 'a:golive', 'a:avoid'] };
+  if (i.act === 'police_crit') return { k: 'scene', tag: 'POLICE INVESTIGATE', a: ['a:open', 'a:brkpolice', 'a:golive', 'a:avoid'] };
+  if (SA.test(L) || /^ASS(JU|PR)?$/.test(code)) return { k: 'scene', tag: 'POLICE RESPOND TO ASSAULT', a: ['a:open', 'a:brkpolice', 'a:golive'] };
+  if ((BE.test(L) && !/attempt/.test(L)) || /^BRE(EN|JU|PR)$/.test(code)) return { k: 'scene', tag: 'BREAK-IN UNDER INVESTIGATION', a: ['a:open', 'a:brkpolice', 'a:golive'] };
+  if (/robbery|abduct|kidnap|home invasion|carjack/.test(L) || code === 'ROB') return { k: 'scene', tag: 'POLICE RESPOND', a: ['a:open', 'a:brkpolice', 'a:golive'] };
   return null;
 }
 function brkTrigger(i, b, title, sub) { if (BRK.seen.has(i.id)) return; BRK.seen.add(i.id); BRK.q.push({ i, b, title, sub, at: performance.now() }); }

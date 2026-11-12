@@ -90,13 +90,30 @@ TYPE_GLOSSARY = {
     "DAM": "Damage to Property", "DAMPR": "Damage to Property (Priority)",
     "BREPR": "Break and Enter (Priority)", "ATTBR": "Attempt Break and Enter",
     "ANICO": "Animal Complaint", "LOSEL": "Lost/Found Property or Person", "FOUPR": "Found Property",
-    "TRE": "Trespassing", "PERGU": "Person Guarding / Person Gone", "SOUGU": "Sound of Gunshots",
+    "TRE": "Trespassing", "PERGU": "Person with a Gun", "SOUGU": "Sound of Gunshots",
+    "PERKN": "Person with a Knife", "BREEN": "Break and Enter", "BREJU": "Break and Enter (Just Occurred)",
+    "ROB": "Robbery", "THE": "Theft", "DAMJU": "Damage to Property (Just Occurred)", "FIG": "Fight",
+    "SEEFI": "See Fire", "FIRAL": "Fire Alarm", "WRWAY": "Wrong Way Driver", "HOLAL": "Holdup Alarm",
+    "FTRPI": "Failed to Remain (Personal Injury)", "FTRPD": "Failed to Remain (Property Damage)",
     "GASLE": "Gas Leak",
 }
 
 
 def plain_type(type_str):
     return TYPE_GLOSSARY.get((type_str or "").strip().upper(), type_str or "Call for Service")
+
+
+def nice_desc(d):
+    """Feed text is SHOUTING ("PERSON WITH A KNIFE"): title-case it, keeping small words and B&E-style tokens tidy."""
+    if not d: return ""
+    small = {"a", "an", "the", "of", "or", "and", "to", "in", "on", "at", "with", "for"}
+    w = re.split(r"(\s+)", d.strip().lower())
+    out, first = [], True
+    for x in w:
+        if not x.strip(): out.append(x); continue
+        out.append(x if (x in small and not first) else (x.upper() if x in ("b&e", "mvc", "edp", "co") else x[:1].upper() + x[1:]))
+        first = False
+    return "".join(out)
 
 
 def stable_id(prefix, *parts):
@@ -110,15 +127,14 @@ def stable_id(prefix, *parts):
     return f"{prefix}_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12]}"
 
 
-def classify(type_str):
-    # check both the raw code and its translated label — handles abbreviated
-    # codes (ASSLT) and already-plain-English fire types (e.g. "Assault")
-    t = f"{type_str or ''} {plain_type(type_str)}".lower()
-    if re.search(r"shoot|shot|firearm|gun|stab|homicide|hostage", t):
+def classify(type_str, desc=""):
+    # check the raw code, its glossary label and the feed's own description (ASSJU / Assault (Just Occurred) / ASSAULT JUST OCCURRED)
+    t = f"{type_str or ''} {plain_type(type_str)} {desc or ''}".lower()
+    if re.search(r"shoot|shot|firearm|\bgun|stab|homicide|hostage|knife|knives|armed|machete|sword|explosi|\bpergu\b|\bperkn\b|\bsougu\b", t):
         return "critical"
-    if re.search(r"robbery|assault|weapon|break.?and.?enter|abduct", t):
+    if re.search(r"robbery|\brob\b|assault|\bass(ju|pr)?\b|weapon|break.{0,6}enter|b\s?&\s?e|break-?in|\bbre(en|ju|pr)\b|abduct|kidnap|home invasion|carjack|arson|sexual", t):
         return "high"
-    if re.search(r"theft|fraud|disturb|mischief|b\s?&\s?e", t):
+    if re.search(r"theft|fraud|disturb|mischief", t):
         return "medium"
     return "low"
 
@@ -218,13 +234,15 @@ def fetch_and_validate_layer(service_url):
     field_names = [f["name"] for f in fields]
     print(f"  [police] layer field names: {field_names}")
 
-    type_field = find_field(fields, ["CALL_TYPE", "TYP_ENG", "OFFENCE", "CATEGORY", "TYPE"])
+    # the layer carries BOTH CALL_TYPE_CODE ("BREEN") and CALL_TYPE ("BREAK AND ENTER"): code for ids/glossary, description for display
+    type_field = find_field(fields, ["CALL_TYPE_CODE", "CALL_TYPE", "TYP_ENG", "OFFENCE", "CATEGORY", "TYPE"])
+    desc_field = next((n for n in field_names if n.upper() in ("CALL_TYPE", "CALL_TYPE_DESC", "CALL_TYPE_DESCRIPTION", "TYP_ENG", "DESCRIPTION")), None)
     div_field = find_field(fields, ["DIVISION", "DIV"])
     date_field = find_field(fields, ["DATE", "TIME", "OCC"])
     loc_field = find_field(fields, ["INTERSECTION", "XSTREET", "CROSS", "ADDRESS", "LOCATION",
                                      "NEIGHBOURHOOD", "NEIGHBORHOOD", "HOOD", "NBHD", "BLOCK", "GEO"])
     oid_field = layer.get("objectIdField", "OBJECTID")
-    print(f"  [police] field mapping -> type:{type_field} div:{div_field} date:{date_field} loc:{loc_field}")
+    print(f"  [police] field mapping -> type:{type_field} desc:{desc_field} div:{div_field} date:{date_field} loc:{loc_field}")
 
     params = {"where": "1=1", "outFields": "*", "outSR": "4326", "resultRecordCount": "500", "f": "json"}
     try:
@@ -259,13 +277,17 @@ def fetch_and_validate_layer(service_url):
         # genuinely distinct incidents at the same intersection without being
         # sensitive to either kind of jitter.
         coarse_time = int(ts_raw // 900000) if isinstance(ts_raw, (int, float)) and ts_raw else 0
+        desc = str(a.get(desc_field) or "").strip() if desc_field else ""
+        if desc.upper() == str(type_str).upper(): desc = ""
         out.append({
             "id": stable_id("tps", loc.lower(), type_str.lower(), coarse_time),
             "source": "police",
             "lat": lat, "lng": lng,
             "type": type_str,
-            "type_plain": plain_type(type_str),
-            "severity": classify(type_str),
+            "type_plain": nice_desc(desc) or plain_type(type_str),
+            "type_voice": TYPE_GLOSSARY.get(str(type_str).strip().upper()),
+            "desc": desc,
+            "severity": classify(type_str, desc),
             "division": (a.get(div_field) if div_field else "") or "",
             "location": loc,
             "ts": ts.isoformat(),

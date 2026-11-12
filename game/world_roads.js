@@ -128,7 +128,7 @@
     const [x0, y0] = ll(c.lng, c.lat); const h = callEdge(x0, y0, c.loc); if (!h) return null;
     const e = h.e, s = Math.max(6, Math.min(eLen[e] - 6, h.s)), t0 = pre ? callTime(c) : simT;
     const name = (c.loc || '').replace(/\s+-\s+/g, ' & ') || edgeName(e);
-    const meta = { real: synthetic ? null : { src: c.src, label: c.label, loc: name, rid: c.id, units: c.units || null, code: c.code }, label: c.label, src: c.src, act: c.act, silent: !!pre, quietResp: !!pre, synth: !!synthetic };
+    const meta = { real: synthetic ? null : { src: c.src, label: c.label, loc: name, rid: c.id, units: c.units || null, code: c.code, vl: c.vl || null }, label: c.label, src: c.src, act: c.act, silent: !!pre, quietResp: !!pre, synth: !!synthetic };
     let inc = null;
     if (c.act in CRASH) { inc = makeCollision(e, CRASH[c.act], Object.assign({ s, fire: c.act === 'carfire', name }, meta)); if (inc) { inc.start = t0; inc.auto = t0 + (c.act === 'crash1' ? 60 : 90) * 60; } }
     else { const A = ACT[c.act] || ACT.police_low; const o = Object.assign({ edge: e, s, name, hood: edgeHood[e], auto: t0 + A.dur * 60, fire: !!A.fire && c.src === 'tfs' }, meta);

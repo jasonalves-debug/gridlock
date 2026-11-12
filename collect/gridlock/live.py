@@ -77,6 +77,8 @@ def calls(st):
         loc = " - ".join(dict.fromkeys(p.strip() for p in _title((i.get("location") or "").replace("Scarborough - ", "")).split(" - ") if p.strip()))
         c = {"id": i["id"], "src": src, "code": code, "label": label, "act": police_act(code, sev) if src == "tps" else fire_act(label),
              "sev": sev, "lat": round(i["lat"], 6), "lng": round(i["lng"], 6), "ts": ts, "loc": loc, "div": i.get("division")}
+        if src == "tps" and i.get("type_voice"):
+            c["vl"] = i["type_voice"]  # the glossary wording the dispatcher voice pack has a clip for
         if src == "tfs" and i.get("units"):
             c["units"] = [u.strip() for u in str(i["units"]).split(",") if u.strip()][:6]
         out.append(c)
