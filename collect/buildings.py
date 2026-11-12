@@ -11,7 +11,10 @@ def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 res = ckan_resources('3d-massing')
 for r in res: log('resource:', r.get('name'), r.get('format'), r.get('url'))
 shp = [r for r in res if str(r.get('format', '')).upper() in ('SHP', 'ZIP') or str(r.get('url', '')).lower().endswith('.zip')]
-pick = next((r for r in shp if any(t in (r.get('name', '') + r.get('url', '')).upper() for t in ('WGS84', '4326'))), shp[0] if shp else None)
+import re
+yr = lambda r: int((re.search(r'(20\d\d)', r.get('name', '')) or [0, 0])[1])
+flat = [r for r in shp if 'MULTIPATCH' not in r.get('name', '').upper() and 'WGS84' in (r.get('name', '') + r.get('url', '')).upper()]
+pick = max(flat, key=yr) if flat else (shp[0] if shp else None)  # newest footprint (non-multipatch) edition
 if not pick: sys.exit('no shapefile resource in 3d-massing')
 log('downloading', pick['name'], pick['url'])
 buf = io.BytesIO(); req = urllib.request.Request(pick['url'], headers={'User-Agent': 'gridlock-collector'})
@@ -30,7 +33,7 @@ log('prj:', prj[:160])
 rd = shapefile.Reader(shp=io.BytesIO(z.read(base + '.shp')), dbf=io.BytesIO(z.read(base + '.dbf')), shx=io.BytesIO(z.read(base + '.shx')) if base + '.shx' in names else None)
 fields = [f[0] for f in rd.fields[1:]]; log('fields:', fields, 'records:', len(rd))
 up = [f.upper() for f in fields]
-hf = next((fields[up.index(k)] for k in ('AVG_HEIGHT', 'MAX_HEIGHT', 'HEIGHT') if k in up), None) or next((f for f in fields if 'HEIGHT' in f.upper() and 'MSL' not in f.upper()), None)
+hf = next((fields[up.index(k)] for k in ('ELEZ', 'AVG_HEIGHT', 'MAX_HEIGHT', 'HEIGHT') if k in up), None) or next((f for f in fields if 'HEIGHT' in f.upper() and 'MSL' not in f.upper()), None)
 log('height field:', hf)
 geo = 'GEOGCS' in prj and 'PROJCS' not in prj
 tf = None
@@ -51,8 +54,9 @@ for sr in rd.iterShapeRecords():
     try: h = round(float(h), 1)
     except (TypeError, ValueError): h = None
     if not h or h <= 0:
-        try: h = round(float(rec.get('HEIGHT_MSL')) - float(rec.get('SURF_ELEV')), 1)
-        except (TypeError, ValueError): h = 6.0
+        try: h = round(float(rec.get('Elevation', rec.get('HEIGHT_MSL'))) - float(rec.get('Z', rec.get('SURF_ELEV'))), 1)
+        except (TypeError, ValueError): h = None
+        if not h or h <= 0: h = 6.0
     flat = []
     for x, y in pts: flat += [round(x, 6), round(y, 6)]
     rows.append([h, flat])
