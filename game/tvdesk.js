@@ -17,7 +17,7 @@ function tvDesk() {
   tvPut('tvTime', timeOf(Date.now() / 1000)); tvPut('tvDate', `${p.weekday.slice(0, 3).toUpperCase()} ${new Intl.DateTimeFormat('en-CA', { timeZone: TZ, month: 'short', day: 'numeric' }).format(new Date()).toUpperCase()}`);
   tvPut('tvWx', w && w.temperature_2m != null ? `<b>${Math.round(w.temperature_2m)}°</b>${esc(wxWord(w).replace(/\s*-?\d+°$/, '').toUpperCase())}` : '');
   const L = pulseLevel(); tvPut('tvPulse', `<h4>CITY PULSE</h4><div class="lv" style="--c:${L.col}"><b>${L.word}</b><span>${esc(levelLine(L).replace(/\s*\(.*\)$/, ''))}</span></div>${pulseChart()}<p><i class="lg bar"></i>police calls per hour <i class="lg dash"></i>normal</p>`);
-  const box = $('tvLatest'), room = box && box.parentElement ? box.parentElement.clientHeight - innerHeight * 0.035 : 0, rows = Math.max(1, Math.min(7, Math.floor(room / (innerHeight * 0.0625)))); // only whole rows
+  const box = $('tvLatest'), room = box && box.parentElement ? box.parentElement.clientHeight - innerHeight * 0.035 : 0, rows = Math.max(1, Math.min(7, Math.floor(room / (innerHeight * 0.059)))); // only whole rows
   const now = Date.now() / 1000, items = pulseItems().filter(i => !i.pin).slice(0, rows);
   tvPut('tvLatest', items.length ? items.map(it => `<div class="tl${now - it.t < 900 || PULSE.fresh.has(it.id) ? ' new' : ''}" style="--c:${P_COL[it.kind]}"><i>${svg(P_ICON[it.kind], P_COL[it.kind])}</i><div><b>${esc(it.title)}</b><span>${esc(it.sub)}</span></div><time>${ago(now - it.t).replace(' ago', '').replace('just now', 'now')}</time></div>`).join('') : '<p class="none">Nothing reported in the last 24 hours.</p>');
   tvRailCam(false);

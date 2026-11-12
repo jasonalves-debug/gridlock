@@ -6,7 +6,7 @@ const DIR = (function () {
   const helis = []; let heliSeq = 1;
   let shot = null, shotQ = [], lastShotEnd = -1e9, savedCam = null, lastUser = 0;
   let pressure = 0, pressureT = 0; const broadcastSeen = new Set(); const stuckSeen = new Set(); const stuckClock = new Map();
-  const headlines = []; let crawlX = 0;
+  const headlines = []; let crawlX = 0, bcX = 0; // crawlX: the TV ticker; bcX: the lower-third crawl (they must not share a position)
   let tv = false, mapOk = null, tourSource = null, camNear = null, tvStats = null, heavyOn = false, lastHeavy = 0, pipT = 0, pipCam = null, lastTourKind = '', first = true, lastVo = 0, lastBoard = 0, boardSource = null, chatNext = performance.now() + 30000; const tourSeen = new Map();
   // ---------------------------------------------------------------- audio graph for voices & music
   function audioReady() {
@@ -77,7 +77,8 @@ const DIR = (function () {
   function division(x, y) { let best = null, bd = 1e18; for (const d of G.depots) { if (d.k !== 'police') continue; const dd = (d.x - x) ** 2 + (d.y - y) ** 2; if (dd < bd) { bd = dd; best = d; } } return best ? 'd:' + best.n.slice(0, 2) : 'd:dispatch'; }
   function crossKeys(name) { const parts = (name || '').split(/ & | - /); if (parts.length === 2 && rk(parts[0]) && rk(parts[1])) return ['d:at', rk(parts[0]), 'd:and', rk(parts[1])]; return rk(parts[0]) ? ['d:on', rk(parts[0])] : []; }
   // ---------------------------------------------------------------- broadcast / headlines
-  function headline(t) { const now = Date.now(); if (headlines.some(h => h.x === t && now - h.t < 1800000)) return; headlines.unshift({ x: t, t: now }); if (headlines.length > 8) headlines.pop(); $('bcCrawl').textContent = headlines.map(h => h.x).join('   ●   '); }
+  // headline: h.t = when it really happened (a real call's own time), h.a = when we showed it
+  function headline(t, ts) { const now = Date.now(); if (headlines.some(h => h.x === t && now - h.a < 1800000)) return; headlines.unshift({ x: t, a: now, t: ts && ts * 1000 < now ? ts * 1000 : now });  if (headlines.length > 8) headlines.pop(); $('bcCrawl').textContent = headlines.map(h => h.x).join('   ●   '); }
   const ago = ms => { const m = Math.round(ms / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.floor(m / 60) + ' h ago'; };
   const TK = { NEWS: '#d7141a', POLICE: '#2f8fd6', FIRE: '#e0700f', MEDICAL: '#d93a5a', ROADS: '#c98a00', TRANSIT: '#b3261e', WEATHER: '#3d6fd0', CITY: '#2a9d6f' };
   function tickerHtml() { const now = Date.now(), e = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); const hs = headlines.filter(h => now - h.t < 10800000).slice(0, 4).map(h => ['NEWS', `${h.x} · ${ago(now - h.t)}`]);
@@ -107,7 +108,7 @@ const DIR = (function () {
       const d = i.desc, what = (d.split(/ on HWY/i)[0] || i.real.label || 'Incident').trim(), where = (/ at ([^,.]+)/i.exec(d) || [])[1], rest = d.split(/\.\s+/).slice(1).join('. ').replace(/\.$/, '');
       return [`401 ${what.toUpperCase()} · ${(i.dir || '').toUpperCase()}`, `${where ? 'At ' + where.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) + ' · ' : ''}${rest || 'Ontario 511'}`]; }
     if (i.type === 'hwy') return [i.crash ? `401 CRASH · ${(i.dir || '').toUpperCase()}` : `401 CLOSED · ${(i.dir || '').toUpperCase()}`, `${i.at ? 'At ' + i.at + ' · ' : ''}${i.crash ? 'Tractor-trailer rollover, OPP on scene' : 'OPP holding traffic at the ramps'}`];
-    if (i.type === 'call') return [`${(i.label || 'Police call').toUpperCase()}`, `${i.name || ''}${i.real ? ' · Real call' : ''}`];
+    if (i.type === 'call') return [`${(i.label || 'Police call').toUpperCase()}`, `${i.name || ''}${i.real ? (i.real.ts ? ' · reported ' + ago(Date.now() - i.real.ts * 1000) : ' · Real call') : ''}`];
     if (i.type === 'hwy' && i.real) return [`HIGHWAY ${(i.real.label || 'INCIDENT').toUpperCase()}`, `${i.real.loc || ''} · Ontario 511`];
     const m = INC[i.type]; return [`${m.name.toUpperCase()} · ${(i.name || '').toUpperCase()}`, ({ collision: i.fire ? 'Vehicle on fire, crews responding' : 'Lanes blocked, crews responding', power: 'Signals dark, intersections running as all-way stops', water: 'Road torn up and closed both ways', closure: 'Police investigation, intersection shut', flood: 'Underpass under water', barricade: 'Residents block their own street', roadclosed: 'Road closed' })[i.type] || ''];
   }
@@ -264,7 +265,7 @@ const DIR = (function () {
     switch (e.k) {
       case 'incident': {
         if (i.type === 'roadclosed' || !isNews(i)) break;
-        const [title, sub] = incTitle(i); headline(title.replace(' · ', ': '));
+        const [title, sub] = incTitle(i); headline(title.replace(' · ', ': '), i.real && i.real.ts);
         if (i.type === 'hwy' && i.real) { const full = !(i.nlanes > 0); say('radio', ['d:opp', i.crash ? 'd:code3' : 'd:respond', i.crash ? 'd:collision' : full ? 'd:hwyclosed' : 'd:heavy', ...crossKeys(i.at || '')], 2); if (full || i.crash) { spawnHeli('news', i); requestShot({ type: 'orbit', track: i.id, x: i.x, y: i.y, h: 520, pitch: 0.95, dur: 7, pri: 3, title, sub, anchor: ['a:open', 'a:hwyreal'], anchorKey: 'hwy' + i.id, sting: !!i.crash }); } }
         else if (i.type === 'hwy') { say('radio', ['d:opp', 'd:code3', i.crash ? 'd:rollover' : 'd:hwyclosed', i.both ? 'd:both' : i.dir === 'westbound' ? 'd:wb' : i.dir === 'eastbound' ? 'd:eb' : null, rk(i.at) ? 'd:at' : null, rk(i.at)], 3);
           spawnHeli('police', i); setTimeout(() => spawnHeli('news', i), 4000);
@@ -342,7 +343,7 @@ const DIR = (function () {
     if (tv) { const cr = $('tvCrawl'); if (cr) { if (!cr.firstChild || crawlX < -cr.offsetWidth) { cr.innerHTML = tickerHtml(); crawlX = cr.parentElement.offsetWidth * (first ? 0.2 : 1); first = false; } crawlX -= dt * Math.max(70, innerHeight * 0.085); cr.style.transform = `translate(${crawlX}px, -50%)`; $('tvClk').textContent = clock(simT, true); } }
     if (AC && !muted && LV.kind && performance.now() > chatNext) { chatNext = performance.now() + 50000 + Math.random() * 80000; // the radio never quite goes silent
       if (!speaking && !speechQ.length && !(shot && shot.board)) { const n = 1 + ((Math.random() * 7) | 0); if (has('c:' + n + 'a')) { say('chatter', ['c:' + n + 'a'], 0, ''); say('chatter', ['c:' + n + 'b'], 0, ''); } } }
-    if (pipCam && shot && performance.now() - pipT > 45000) { const c = camNear && camNear(shot.x, shot.y); pipT = performance.now(); if (c) $('bcPipImg').src = c.url; } const cr = $('bcCrawl'); if (!$('bcast').hidden && cr.textContent) { crawlX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (crawlX < -w) crawlX = W; cr.style.left = crawlX + 'px'; } }
+    if (pipCam && shot && performance.now() - pipT > 45000) { const c = camNear && camNear(shot.x, shot.y); pipT = performance.now(); if (c) $('bcPipImg').src = c.url; } const cr = $('bcCrawl'); if (!tv && !$('bcast').hidden && cr.textContent) { bcX -= dt * 70; const w = cr.offsetWidth, W = cr.parentElement.offsetWidth; if (bcX < -w) bcX = W; cr.style.left = bcX + 'px'; } }
   function hold(ms) { if (shot) endShot(true); shotQ = []; lastUser = performance.now() + ms; } // pause the auto camera, e.g. after the viewer picks their own area
   function cut(s) { if (!tv || !autoCam || !ready || ended || performance.now() - lastUser < 15000) return false; if (shot) { shot = null; cineOff(); } shotQ = []; startShot(s); return true; } // breaking news: straight to air, over whatever is showing
   function userInput() { lastUser = performance.now(); if (shot) endShot(true); }
