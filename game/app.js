@@ -147,7 +147,7 @@ function startWorker(opts) {
 function cmd(fn, ...args) { return new Promise(res => { const id = reqSeq++; pending.set(id, res); worker.postMessage({ type: 'cmd', id, fn, args }); }); }
 function onWorker(m) {
   const d = m.data;
-  if (d.type === 'progress') { $('loadBar').style.width = Math.round(d.p * 100) + '%'; $('loadTxt').textContent = 'Morning traffic is building…'; }
+  if (d.type === 'progress') { $('loading').classList.remove('busy'); $('loadBar').style.width = Math.round(d.p * 100) + '%'; $('loadTxt').textContent = `Morning traffic is building… ${Math.round(d.p * 100)}%`; }
   else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; $('tvBtn').hidden = !LV.kind; if (LV.tvNext) { LV.tvNext = false; setTimeout(() => tvSet(true, false), 300); } if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; $('start').hidden = true; $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
   else if (d.type === 'frame') {
     frameWaiting = false; spareBuf = posBuf; posBuf = d.buf; frameN = d.n; simT = d.t; rainOn = d.rain; snowOn = d.snow; fogOn = d.fog; stormOn = d.storm; onWorld(d);
@@ -633,8 +633,9 @@ function endShift() {
 /*__LIVEAPP__*/
 // ---------------------------------------------------------------- start
 async function begin(m) {
-  audioInit(); const kind = m === 'live' || m === 'replay' ? m : null; if (kind) m = 'watch'; mode = m; LV.kind = kind; $('loading').hidden = false; document.querySelectorAll('.mode').forEach(b => b.disabled = true);
+  audioInit(); const kind = m === 'live' || m === 'replay' ? m : null; if (kind) m = 'watch'; mode = m; LV.kind = kind; $('loading').hidden = false; $('loading').classList.add('busy'); $('loadTxt').textContent = 'Loading Scarborough…'; document.querySelectorAll('.mode').forEach(b => b.disabled = true);
   if (LV.loading) { $('loadTxt').textContent = 'Pulling live Toronto data…'; try { await Promise.race([LV.loading, new Promise(r => setTimeout(r, 12000))]); } catch (e) {} }
+  $('loadTxt').textContent = 'Building the streets…'; await new Promise(r => setTimeout(r, 30)); // let the label paint before the heavy setup
   const L = worldInitFor(m, kind);
   let startT = m === 'watch' ? 6.75 * 3600 : m === 'shift' ? 5.75 * 3600 : profile === 'rush' ? 7.25 * 3600 : profile === 'midday' ? 11.75 * 3600 : 23.25 * 3600;
   if (kind === 'live') startT = Date.now() / 1000 - L.epoch0 - 900; else if (kind === 'replay') startT = replayStart(L.epoch0) - 900;

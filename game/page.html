@@ -159,8 +159,9 @@ button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .tod { display: flex; gap: 6px; } .tod button { flex: 1; height: 34px; border-radius: 7px; border: 1px solid var(--line); background: #10171f; font-size: 12px; cursor: pointer; color: var(--muted); } .tod button[aria-pressed="true"] { color: #061018; background: var(--cyan); border-color: var(--cyan); }
 .legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; font-size: 12px; color: var(--muted); }
 .legend span { display: flex; align-items: center; gap: 8px; } .legend i { width: 18px; height: 4px; border-radius: 2px; flex: none; }
-.loading { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
-.loading .bar { height: 3px; background: rgba(255,255,255,.08); margin-top: 6px; border-radius: 2px; overflow: hidden; } .loading .bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width .2s; }
+.loading { font-family: var(--f-mono); font-size: 15px; color: var(--muted); margin-top: 18px; }
+#start.auto .lede { margin-bottom: 4px; } .loading.busy .bar i { width: 28% !important; animation: loadSlide 1.3s ease-in-out infinite; } @keyframes loadSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(360%); } }
+.loading .bar { height: 5px; background: rgba(255,255,255,.08); margin-top: 6px; border-radius: 2px; overflow: hidden; } .loading .bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width .2s; }
 #report { background: rgba(4,7,10,.94); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .grade { font-size: 96px; font-weight: 800; line-height: .9; font-stretch: 62%; color: var(--amber); }
 .rep { display: grid; grid-template-columns: 1fr auto; gap: 7px 14px; font-size: 14px; }
@@ -370,7 +371,7 @@ body.tv #tvExit { top: 8px; }
   <button type="button" class="back" id="bcBack">Back to ops ✕</button>
 </div>
 
-<div class="screen" id="start">
+<div class="screen auto" id="start">
   <div class="panel">
     <div class="kicker">UNOFFICIAL · BUILT FROM PUBLIC DATA · UPDATED EVERY FEW MINUTES</div>
     <h1 class="title">Gridlock<span>Scarborough</span></h1>
@@ -385,9 +386,10 @@ body.tv #tvExit { top: 8px; }
       <span><i style="background:var(--green)"></i>Flowing</span><span><i style="background:var(--amber)"></i>Slow</span>
       <span><i style="background:var(--red)"></i>Jammed</span><span><i style="background:#a60d1f"></i>Stopped</span>
     </div>
-    <div class="loading" id="loading" hidden><span id="loadTxt">Loading the road network…</span><div class="bar"><i id="loadBar"></i></div></div>
+    <div class="loading busy" id="loading"><span id="loadTxt">Loading Scarborough…</span><div class="bar"><i id="loadBar"></i></div></div>
   </div>
 </div>
+<script>/* the title screen is a loading screen from the first paint; only #menu and #tv show the mode cards */ (function () { var h = location.hash; if (h === '#menu' || h === '#tv') { var s = document.getElementById('start'), l = document.getElementById('loading'); s.classList.remove('auto'); l.hidden = true; l.classList.remove('busy'); } })();</script>
 
 <div class="screen" id="report" hidden>
   <div class="panel" id="repPanel"></div>
