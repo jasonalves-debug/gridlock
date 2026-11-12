@@ -39,7 +39,8 @@ for key in ('live', 'static'):
 
 blocks = {'voice': json.dumps(V, separators=(',', ':')), 'livesnap': json.dumps(snap, separators=(',', ':')).replace('</', '<\\/'),
           'graph': json.dumps(graph(), separators=(',', ':')).replace('</', '<\\/'),
-          'fsapoly': read('geo/fsa_m1.json')}  # real postal-area outlines (Statistics Canada FSA boundary file, simplified)
+          'fsapoly': read('geo/fsa_m1.json'),
+          'bld': read('geo/buildings.json') if os.path.exists('geo/buildings.json') else '{}'}  # real buildings (City of Toronto 3D Massing, tools/buildings.py)  # real postal-area outlines (Statistics Canada FSA boundary file, simplified)
 render = read('render.js')
 for name, src in [('sim', sim), ('render', render), ('app', app), *blocks.items()]:
     assert '</script' not in src, name

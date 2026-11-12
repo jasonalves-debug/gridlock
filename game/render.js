@@ -489,7 +489,7 @@ function init(canvas, graph, q) {
   G = graph; buildPrograms();
   quadBuf = buf(new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]));
   postVao = vao([{ buf: quadBuf, stride: 2, attrs: [[0, 2]] }]);
-  buildRoads(); buildLake(); buildSignals(); buildLand(); buildHouses(); bakeLots(); buildFill(); buildTrees();
+  buildRoads(); buildLake(); buildSignals(); buildLand(); REAL = realData(); if (REAL) { buildReal(); bakeLots(); emptyFill(); } else { buildHouses(); bakeLots(); buildFill(); } buildTrees();
   carBuf = buf(new Float32Array(carCap * 4), gl.DYNAMIC_DRAW);
   carVao = vao([{ buf: quadBuf, stride: 2, attrs: [[0, 2]] }, { buf: carBuf, stride: 4, attrs: [[1, 4]], div: 1 }]);
   car3Vao = vao([{ buf: cubeBuf, stride: 6, attrs: [[0, 3], [1, 3]] }, { buf: carBuf, stride: 4, attrs: [[2, 4]], div: 1 }]);
@@ -664,6 +664,26 @@ function buildHouses() {
   for (const p of G.places) { if (!['mall', 'jobs', 'school', 'hospital', 'transit'].includes(p.t)) continue; const n = p.t === 'mall' ? 5 : 4; for (let j = 0; j < n; j++) { const ang = rnd() * 6.28, r = 60 + rnd() * 140; const x = p.x + Math.cos(ang) * r, y = p.y + Math.sin(ang) * r; if (nearRoad(x, y, 45)) continue; bldSrc.push([x, y, rnd() * 0.3, rnd(), 40 + rnd() * 60, 30 + rnd() * 50, p.t === 'mall' ? 12 + rnd() * 6 : 14 + rnd() * 30, 1], null); } }
   uploadBuildings([]);
 }
+// ---------------------------------------------------------------- real buildings (City of Toronto 3D Massing 2025, tools/buildings.py): oriented boxes,
+// pitched roofs on houses, flat roofs on everything else at its real height. When present they replace the made-up houses and side streets.
+let REAL = null, bldGrid = null; const BG = 40;
+function realData() { try { const el = document.getElementById('bld'); if (!el) return null; const j = JSON.parse(el.textContent); if (!j || !j.n) return null;
+  const bin = atob(j.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Uint16Array(u8.buffer, 0, j.n * 6); } catch (e) { return null; } }
+function bldAdd(k, x, y, ang, w, d) { const c = Math.cos(ang), sn = Math.sin(ang), r = Math.hypot(w, d) / 2; for (let ax = Math.floor((x - r) / BG); ax <= Math.floor((x + r) / BG); ax++) for (let ay = Math.floor((y - r) / BG); ay <= Math.floor((y + r) / BG); ay++) { const key = ax * 100003 + ay; let a = bldGrid.get(key); if (!a) bldGrid.set(key, a = []); a.push(k, x, y, c, sn, w / 2, d / 2); } }
+function inBld(x, y, pad) { if (!bldGrid) return -1; const a = bldGrid.get(Math.floor(x / BG) * 100003 + Math.floor(y / BG)); if (!a) return -1;
+  for (let i = 0; i < a.length; i += 7) { const dx = x - a[i + 1], dy = y - a[i + 2], u = dx * a[i + 3] + dy * a[i + 4], v = -dx * a[i + 4] + dy * a[i + 3]; if (Math.abs(u) < a[i + 5] + pad && Math.abs(v) < a[i + 6] + pad) return a[i]; } return -1; }
+function buildReal() {
+  bldSrc.length = 0; bldGrid = new Map(); fillTrees = []; const r = REAL, n = r.length / 6; let seed = 31; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < n; i++) { const o = i * 6, x = r[o] / 2 - 16384, y = r[o + 1] / 2 - 16384, ang = r[o + 2] / 10000 * Math.PI, w = r[o + 3] / 10, d = r[o + 4] / 10, h = r[o + 5] / 10, r2 = rnd(), r3 = rnd();
+    if (nearRoad(x, y, Math.min(4, d * 0.25)) || y > shoreY(x) - 8) continue; // the model's roads are a little wider than life: skip anything that would sit on the asphalt
+    const k = bldSrc.length;
+    if (w * d < 300 && h < 12) { bldSrc.push([x, y, ang, r2, w, d, Math.max(2.6, Math.min(8, h * 0.8)), 0], [x, y, r2, r3]); // a house: walls, then the gable on top
+      if (r3 < 0.55) { const side = r2 < 0.5 ? -1 : 1, off = d / 2 + 5 + r3 * 7, lat = (r2 - 0.5) * w, tx = x + Math.cos(ang) * lat - Math.sin(ang) * off * side, ty = y + Math.sin(ang) * lat + Math.cos(ang) * off * side; fillTrees.push([tx, ty, r3 < 0.2 ? 1 : 0]); } }
+    else bldSrc.push([x, y, ang, r2, w, d, h, h >= 20 ? 2 : 1], null);
+    bldAdd(k, x, y, ang, w, d); }
+  uploadBuildings([]);
+}
+function emptyFill() { fillM = new Uint8Array(fillN * fillN); fillTex = tex(fillN, fillN, 'r8'); gl.bindTexture(gl.TEXTURE_2D, fillTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, fillN, fillN, gl.RED, gl.UNSIGNED_BYTE, fillM); }
 const bldSrc = []; // procedural buildings, pairs of [instance, house-light or null]; towers replace the ones they overlap
 let gableBuf = null, treeBuf = null;
 function uploadBuildings(clear) {
@@ -677,7 +697,7 @@ function uploadBuildings(clear) {
 }
 function buildTrees() { // street trees, back-yard trees and woods where the land map says nothing is built
   const v = []; let seed = 99; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const add = (x, y, big, con) => { if (y > shoreY(x) - 12) return; const r = (con ? 2.2 : 3.2) + rnd() * (big ? 3.4 : 2.2), h = con ? r * (3.2 + rnd() * 1.4) : r * (1.9 + rnd() * 0.9); v.push(x, y, r, h, rnd(), con ? 1 : 0, 0, 0); };
+  const add = (x, y, big, con) => { if (y > shoreY(x) - 12) return; if (REAL && inBld(x, y, 1.2) >= 0) return; const r = (con ? 2.2 : 3.2) + rnd() * (big ? 3.4 : 2.2), h = con ? r * (3.2 + rnd() * 1.4) : r * (1.9 + rnd() * 0.9); v.push(x, y, r, h, rnd(), con ? 1 : 0, 0, 0); };
   for (let e = 0; e < G.ea.length; e++) { const cls = G.cls[e]; if (cls < 2 || (R.rev[e] >= 0 && R.rev[e] < e)) continue; const p = polyPts(e), half = (G.lanes[e] + (R.rev[e] >= 0 ? G.lanes[R.rev[e]] : 0)) * 1.7, step = cls === 5 ? 19 : cls === 4 ? 24 : 38; let acc0 = 0; const tot = G.len[e];
     for (let i = 0; i < p.length - 1; i++) { const dx = p[i + 1][0] - p[i][0], dy = p[i + 1][1] - p[i][1], l = Math.hypot(dx, dy); if (l < 1) continue; const nx = -dy / l, ny = dx / l;
       for (let d = rnd() * step; d < l; d += step * (0.7 + rnd() * 0.7)) { if (acc0 + d < 16 || acc0 + d > tot - 16) continue; for (const side of [-1, 1]) { if (rnd() < 0.3) continue; const off = half + 2.6 + rnd() * 1.2, x = p[i][0] + dx / l * d + nx * off * side, y = p[i][1] + dy / l * d + ny * off * side; if (!nearRoad(x, y, 1.2, e)) add(x, y, false, false);
@@ -686,11 +706,16 @@ function buildTrees() { // street trees, back-yard trees and woods where the lan
   const x0 = landExt[0], y0 = landExt[1], w = 1 / landExt[2], h = 1 / landExt[3], st = 16; // woods and parks: dense in the forest patches, scattered in the meadows
   for (let y = y0; y < y0 + h; y += st) for (let x = x0; x < x0 + w; x += st) { const [g, a] = landAt(x, y); if (g < 0.45 || a < 0.5) continue; const cx = Math.floor((x - x0) * landExt[2] * landN), cy = Math.floor((y - y0) * landExt[3] * landN), f = landF[cy * landN + cx] || 0;
     const px = x + (rnd() - 0.5) * st, py = y + (rnd() - 0.5) * st; if (rnd() > g * (0.08 + 0.9 * f)) continue; if (!nearRoad(px, py, 7)) add(px, py, true, rnd() < 0.22 + 0.2 * f); }
-  for (const [x, y, big] of fillTrees) if (fillAt(x, y) >= 128) add(x, y, !!big, rnd() < 0.15);
+  for (const [x, y, big] of fillTrees) if (REAL ? !nearRoad(x, y, 1.5) : fillAt(x, y) >= 128) add(x, y, !!big, rnd() < 0.15);
   treeBuf = buf(treeGeo()); trees = chunked(new Float32Array(v), 8, treeBuf, 6, [[0, 3], [1, 3]], 90, [[2, 4], [3, 4]]);
 }
 let towerVao = null, towerN = 0, railVao = null, railCount = 0;
 function setLandmarks(list) { // real buildings [[x, y, angle, w, d, h, kind]] (2 = apartment tower, 3 = school / worship): nudged off the road, replacing the made-up houses they cover
+  if (REAL) { for (const [x, y, , w, d, , kind] of list) { let best = -1, bs = -1; const rr = Math.max(20, Math.hypot(w, d) / 2);
+      for (let ax = Math.floor((x - rr) / BG); ax <= Math.floor((x + rr) / BG); ax++) for (let ay = Math.floor((y - rr) / BG); ay <= Math.floor((y + rr) / BG); ay++) { const a = bldGrid.get(ax * 100003 + ay); if (!a) continue;
+        for (let i = 0; i < a.length; i += 7) { const b = bldSrc[a[i]]; if (!b || b[7] === 0 || Math.hypot(b[0] - x, b[1] - y) > rr + Math.hypot(b[4], b[5]) / 2) continue; const sc = kind === 2 ? b[6] : b[4] * b[5]; if (sc > bs) { bs = sc; best = a[i]; } } }
+      if (best >= 0) bldSrc[best][7] = kind; }
+    towerN = 0; towerVao = null; uploadBuildings([]); return; }
   const ti = [], clear = [];
   for (const [x0, y0, ang, w, d, h, kind] of list) {
     const nx = -Math.sin(ang), ny = Math.cos(ang); let x = x0, y = y0;
