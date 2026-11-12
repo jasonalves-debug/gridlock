@@ -38,7 +38,8 @@ for key in ('live', 'static'):
         if os.path.exists(LOCAL + name): snap[key] = json.load(open(LOCAL + name)); print('snapshot', name, 'from local copy:', str(e)[:60])
 
 blocks = {'voice': json.dumps(V, separators=(',', ':')), 'livesnap': json.dumps(snap, separators=(',', ':')).replace('</', '<\\/'),
-          'graph': json.dumps(graph(), separators=(',', ':')).replace('</', '<\\/')}
+          'graph': json.dumps(graph(), separators=(',', ':')).replace('</', '<\\/'),
+          'fsapoly': read('geo/fsa_m1.json')}  # real postal-area outlines (Statistics Canada FSA boundary file, simplified)
 render = read('render.js')
 for name, src in [('sim', sim), ('render', render), ('app', app), *blocks.items()]:
     assert '</script' not in src, name

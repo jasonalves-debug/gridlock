@@ -8,11 +8,11 @@ const brkE = x => x * x * (3 - 2 * x), brkC = (x, a, b) => Math.min(1, Math.max(
 function brkClass(i) { // → null when it isn't breaking
   if (!i || i.type !== 'call' || i.synth) return null;
   const L = String(i.label || (i.real && i.real.label) || '').toLowerCase(), code = String((i.real && i.real.code) || '').toUpperCase();
-  if (i.src === 'tfs') return i.act === 'fire_struct' ? { k: 'fire', tag: 'FIRE CREWS ON SCENE', a: ['a:open', 'a:firescene', 'a:avoid'] } : null;
+  if (i.src === 'tfs') return i.act === 'fire_struct' ? { k: 'fire', tag: 'FIRE CREWS ON SCENE', a: ['a:open', 'a:brkfire', 'a:golive', 'a:avoid'] } : null;
   if (i.src !== 'tps') return null;
-  if (code === 'ARR' || /\barrest/.test(L)) return { k: 'arrest', tag: 'POLICE MAKE AN ARREST', a: ['a:open', 'a:policeop'] };
-  if (i.act === 'police_crit' || /shoot|shots|gun|stab|homicide|hostage|firearm|weapon/.test(L)) return { k: 'scene', tag: 'POLICE INVESTIGATE', a: ['a:open', 'a:policeop', 'a:avoid'] };
-  if (/robbery|abduct/.test(L) || (/assault/.test(L) && /priority|progress|just/.test(L))) return { k: 'scene', tag: 'POLICE RESPOND', a: ['a:open', 'a:policeop'] };
+  if (code === 'ARR' || /\barrest/.test(L)) return { k: 'arrest', tag: 'POLICE MAKE AN ARREST', a: ['a:open', 'a:brkarrest', 'a:golive'] };
+  if (i.act === 'police_crit' || /shoot|shots|gun|stab|homicide|hostage|firearm|weapon/.test(L)) return { k: 'scene', tag: 'POLICE INVESTIGATE', a: ['a:open', 'a:brkpolice', 'a:golive', 'a:avoid'] };
+  if (/robbery|abduct/.test(L) || (/assault/.test(L) && /priority|progress|just/.test(L))) return { k: 'scene', tag: 'POLICE RESPOND', a: ['a:open', 'a:brkpolice', 'a:golive'] };
   return null;
 }
 function brkTrigger(i, b, title, sub) { if (BRK.seen.has(i.id)) return; BRK.seen.add(i.id); BRK.q.push({ i, b, title, sub, at: performance.now() }); }
@@ -118,12 +118,33 @@ function brkSpritesB(put, dt) {
 }
 
 // ---------------------------------------------------------------- sound under the report (fire crackle, or a police siren wailing past)
-function brkAudio(k) {
+let BRK_CRK = null; // 3 s of fire crackle: sparse sharp ticks and the odd louder snap, looped
+function brkCrackle() { if (BRK_CRK) return BRK_CRK; const n = AC.sampleRate * 3, b = AC.createBuffer(2, n, AC.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let k = 0; k < 140; k++) { const at = (Math.random() * (n - 2000)) | 0, big = Math.random() < 0.08, len = big ? 900 : 60 + Math.random() * 260, amp = big ? 0.9 : 0.15 + Math.random() * 0.45;
+      for (let j = 0; j < len; j++) d[at + j] += (Math.random() * 2 - 1) * amp * Math.pow(1 - j / len, big ? 2 : 4); } }
+  return BRK_CRK = b; }
+function brkAudio(k) { // the sound of the scene under the anchor: arriving siren, engines idling, doors, radio; for a fire the roar, crackle, pump and hoses
   if (!AC || muted || !noiseB || !master) return; try {
-    const t = AC.currentTime, dur = 22, g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(k === 'fire' ? 0.07 : 0.03, t + 1.5); g.gain.setValueAtTime(k === 'fire' ? 0.07 : 0.03, t + dur - 3); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); g.connect(master);
-    if (k === 'fire') { const s = AC.createBufferSource(); s.buffer = noiseB; s.loop = true; const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 520; f.Q.value = 0.7; const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 7; lg.gain.value = 0.5; lfo.connect(lg); lg.connect(g.gain); s.connect(f); f.connect(g); s.start(t); s.stop(t + dur); lfo.start(t); lfo.stop(t + dur); }
-    else { const o = AC.createOscillator(); o.type = 'sawtooth'; const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800; for (let n = 0; n < 14; n++) { o.frequency.setValueAtTime(650, t + n * 1.5); o.frequency.linearRampToValueAtTime(1150, t + n * 1.5 + 0.75); o.frequency.linearRampToValueAtTime(650, t + n * 1.5 + 1.5); } o.connect(f); f.connect(g); o.start(t); o.stop(t + dur); }
-  } catch (e) {}
+    const t = AC.currentTime, dur = BRK_DUR - 2, bus = AC.createGain(); bus.gain.setValueAtTime(0.0001, t); bus.gain.exponentialRampToValueAtTime(1, t + 1.2); bus.gain.setValueAtTime(1, t + dur - 3); bus.gain.exponentialRampToValueAtTime(0.0001, t + dur); bus.connect(amb);
+    const loop = (buf, f, type, q, lv, t0, t1) => { const s = AC.createBufferSource(); s.buffer = buf; s.loop = true; const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(lv, t0 + 1.5); s.connect(fl); fl.connect(g); g.connect(bus); s.start(t0, Math.random()); s.stop(t1); return g; };
+    const hum = (f, lv, t0) => { const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; const g = AC.createGain(); g.gain.value = lv; o.connect(lp); lp.connect(g); g.connect(bus); o.start(t0); o.stop(t + dur); };
+    const door = at => { tone(at, 0.16, 85, 48, 'sine', 0.12, 0.002, bus); nz(at, 0.12, 600, 0.7, 'lowpass', 0.09, 0, bus); nz(at + 0.01, 0.05, 2600, 1.5, 'bandpass', 0.03, 0, bus); };
+    const radio = (at, pair) => setTimeout(() => { if (BRK.cur && DIR.has(pair[0])) { DIR.say('chatter', [pair[0]], 0, ''); DIR.say('chatter', [pair[1]], 0, ''); } }, (at - t) * 1000);
+    if (k === 'fire') {
+      loop(noiseB, 380, 'bandpass', 0.5, 0.05, t, t + dur);                                                   // roar
+      const cr = loop(brkCrackle(), 1800, 'highpass', 0.4, 0.22, t + 0.5, t + dur);                              // crackle
+      const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = 0.23; lg.gain.value = 0.08; lfo.connect(lg); lg.connect(cr.gain); lfo.start(t); lfo.stop(t + dur);
+      hum(46, 0.05, t + 0.3); hum(92.5, 0.02, t + 0.3);                                                         // pumper engine
+      for (const [a, l] of [[1.6, 0.55], [2.3, 1.0]]) for (const f of [185, 233, 277]) tone(t + a, l, f, f * 0.97, 'sawtooth', 0.016, 0.03, bus); // air horn
+      sirenPass(t + 2.6, { dur: 7.5, peak: 0.035, near: 0.55, dest: bus });
+      loop(noiseB, 3200, 'highpass', 0.3, 0.025, t + 7, t + dur);                                                // hose spray
+      radio(t + 13, ['c:4a', 'c:4b']);
+    } else {
+      hum(34, 0.035, t); hum(41, 0.022, t + 0.4);                                                               // cruisers idling
+      if (k === 'arrest') { door(t + 0.5); door(t + 1.6); sirenPass(t + 3.5, { dur: 6.5, peak: 0.022, near: 0.3, dest: bus }); radio(t + 12, ['c:2a', 'c:2b']); }
+      else { sirenPass(t + 2.2, { dur: 7, peak: 0.034, near: 0.6, yelp: 1.1, dest: bus }); door(t + 8.6); sirenPass(t + 9, { dur: 9, peak: 0.012, near: 0, dest: bus }); radio(t + 13, ['c:6a', 'c:6b']); }
+    }
+  } catch (e) { console.warn('brkAudio', e); }
 }
 
 // test hook: stage a scene at the camera (kind: fire | arrest | scene)

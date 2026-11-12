@@ -76,9 +76,18 @@ function nearestRoad(x, y, r, pred) { let best = -1, bd = r, side = 0; const c0x
 const ctrlAppr = G.ctrls.map(() => []); for (let e = 0; e < E; e++) if (G.ctrl[e] >= 0) ctrlAppr[G.ctrl[e]].push(e);
 function ctrlName(c) { const s = new Set(); for (const e of ctrlAppr[c]) if (G.name[e] >= 0) s.add(G.names[G.name[e]]); const a = [...s]; return a.length > 1 ? a.slice(0, 2).join(' & ') : a[0] || 'Intersection'; }
 const nodeIn = new Map(); for (let e = 0; e < E; e++) { const b = G.eb[e]; if (!nodeIn.has(b)) nodeIn.set(b, []); nodeIn.get(b).push(e); }
-// road label candidates
-const labelCand = []; { const lastByName = new Map(); const order = []; for (let e = 0; e < E; e++) if (G.cls[e] <= 3 && G.name[e] >= 0 && (rev[e] < 0 || rev[e] > e) && G.len[e] > 180) order.push(e); order.sort((a, b) => G.cls[a] - G.cls[b] || G.len[b] - G.len[a]);
-  for (const e of order) { const p = pts(e); const m = Math.floor((p.length - 1) / 2); const a = p[m], b = p[m + 1] || p[m]; const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2; const n = G.names[G.name[e]]; const prev = lastByName.get(n) || []; if (prev.some(q => (q[0] - x) ** 2 + (q[1] - y) ** 2 < 1600 ** 2)) continue; prev.push([x, y]); lastByName.set(n, prev); let ang = Math.atan2(b[1] - a[1], b[0] - a[0]); labelCand.push({ x, y, ang, n: n.replace(/ Avenue( East)?$/, ' Ave').replace(/ Road$/, ' Rd').replace(/ Drive$/, ' Dr').replace(/ Boulevard$/, ' Blvd').replace(/ Street( East)?$/, ' St').replace('Highway 401 Express', '401 Express').replace('Highway 401 Collector', '401 Collector'), cls: G.cls[e] }); } }
+// road label candidates: points spaced along every named street (not just long segments), each with a level so far zooms keep a
+// sparse set (level 0, ~1.5 km apart per street) and close zooms add more (level 1 ~700 m, level 2 ~300 m)
+const labelCand = []; { const short = n => n.replace(/ Avenue( East)?$/, ' Ave').replace(/ Road$/, ' Rd').replace(/ Drive$/, ' Dr').replace(/ Boulevard$/, ' Blvd').replace(/ Street( East)?$/, ' St').replace(/ Crescent$/, ' Cres').replace(/ Court$/, ' Ct').replace('Highway 401 Express', '401 Express').replace('Highway 401 Collector', '401 Collector');
+  const order = []; for (let e = 0; e < E; e++) if (G.cls[e] <= 5 && G.name[e] >= 0 && (rev[e] < 0 || rev[e] > e)) order.push(e); order.sort((a, b) => G.cls[a] - G.cls[b] || G.len[b] - G.len[a]);
+  const byName = new Map(), GAP = [1500, 700, 300];
+  for (const e of order) { const p = pts(e), nm = G.name[e]; let sel = byName.get(nm); if (!sel) byName.set(nm, sel = []);
+    const segs = []; let tot = 0; for (let k = 0; k + 1 < p.length; k++) { const l = Math.hypot(p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]); segs.push(l); tot += l; } if (tot < 40) continue;
+    const n = Math.max(1, Math.round(tot / 150)); // samples every ~150 m, centred
+    for (let j = 0; j < n; j++) { let d = tot * (j + 0.5) / n, k = 0; while (k < segs.length - 1 && d > segs[k]) d -= segs[k++]; const a = p[k], b = p[k + 1], f = segs[k] ? d / segs[k] : 0, x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
+      let near = 1e18; for (const q of sel) near = Math.min(near, (q.x - x) ** 2 + (q.y - y) ** 2); const lv = near > GAP[0] ** 2 ? 0 : near > GAP[1] ** 2 ? 1 : near > GAP[2] ** 2 ? 2 : -1; if (lv < 0) continue;
+      const L = { x, y, ang: Math.atan2(b[1] - a[1], b[0] - a[0]), n: short(G.names[nm]), cls: G.cls[e], lv }; sel.push(L); labelCand.push(L); } }
+  labelCand.sort((a, b) => a.cls - b.cls || a.lv - b.lv); }
 
 // ---------------------------------------------------------------- state
 let mode = 'shift', profile = 'rush', worker = null, ready = false, simT = 6 * 3600, speed = 10, lastSpeed = 10;
@@ -464,9 +473,16 @@ function drawOverlay() {
   const wpp = cam.wpp; hoodRects = [];
   c.textAlign = 'center'; c.textBaseline = 'middle';
   // road labels
-  if (wpp < 9) { const placed = []; c.font = `600 ${wpp < 2.5 ? 12 : 11}px ${getFont()}`; for (const L of labelCand) { if (L.cls > (wpp < 2.5 ? 3 : wpp < 5 ? 2 : 1)) continue; const p = R.project(L.x, L.y, 0); if (!p || p[0] < -40 || p[0] > innerWidth + 40 || p[1] < 60 || p[1] > innerHeight - 60) continue; if (placed.some(q => (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 < 150 ** 2)) continue; placed.push(p);
-    let a = L.ang; const q = R.project(L.x + Math.cos(a) * 10, L.y + Math.sin(a) * 10, 0); if (q) a = Math.atan2(q[1] - p[1], q[0] - p[0]); if (a > Math.PI / 2) a -= Math.PI; if (a < -Math.PI / 2) a += Math.PI;
-    c.save(); c.translate(p[0], p[1]); c.rotate(a); c.lineJoin = 'round'; c.lineWidth = 3; c.strokeStyle = 'rgba(4,7,10,.85)'; c.strokeText(L.n, 0, 0); c.fillStyle = L.cls <= 1 ? 'rgba(255,200,120,.85)' : 'rgba(225,232,240,.78)'; c.fillText(L.n, 0, 0); c.restore(); } }
+  if (wpp < 9) { // bigger type on the TV layout; arterials from mid zoom, collectors and side streets only up close
+    const big = document.body.classList.contains('tvbig'), fs = Math.round((wpp < 2.5 ? 14 : 13) * (big ? 1.2 : 1)), maxCls = wpp < 1.3 ? 5 : wpp < 2.5 ? 4 : wpp < 5 ? 3 : 2, maxLv = wpp < 1.5 ? 2 : wpp < 4 ? 1 : 0;
+    c.font = `600 ${fs}px ${getFont()}`; const placed = [], seen = new Map(), H = fs + 6;
+    for (const L of labelCand) { if (L.cls > maxCls || L.lv > maxLv) continue; const p = R.project(L.x, L.y, 0); if (!p || p[0] < -40 || p[0] > innerWidth + 40 || p[1] < 60 || p[1] > innerHeight - 60) continue;
+      let a = L.ang; const q = R.project(L.x + Math.cos(a) * 10, L.y + Math.sin(a) * 10, 0); if (q) a = Math.atan2(q[1] - p[1], q[0] - p[0]); if (a > Math.PI / 2) a -= Math.PI; if (a < -Math.PI / 2) a += Math.PI;
+      if (L.fs !== fs) { L.w = c.measureText(L.n).width; L.fs = fs; } const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a)), hx = ca * L.w / 2 + sa * H / 2 + 6, hy = sa * L.w / 2 + ca * H / 2 + 4;
+      if (placed.some(o => Math.abs(o[0] - p[0]) < o[2] + hx && Math.abs(o[1] - p[1]) < o[3] + hy)) continue;
+      const same = seen.get(L.n); if (same && same.some(o => (o[0] - p[0]) ** 2 + (o[1] - p[1]) ** 2 < 320 ** 2)) continue; // one name per ~320 px of screen
+      placed.push([p[0], p[1], hx, hy]); if (same) same.push(p); else seen.set(L.n, [p]);
+      c.save(); c.translate(p[0], p[1]); c.rotate(a); c.lineJoin = 'round'; c.lineWidth = 3.5; c.strokeStyle = 'rgba(4,7,10,.9)'; c.strokeText(L.n, 0, 0); c.fillStyle = L.cls <= 1 ? 'rgba(255,200,120,.92)' : L.cls >= 5 ? 'rgba(200,210,222,.72)' : 'rgba(232,238,245,.88)'; c.fillText(L.n, 0, 0); c.restore(); } }
   // places
   if (wpp < 14) { c.font = `600 10.5px ${getMono()}`; for (const pl of G.places) { const p = R.project(pl.x, pl.y, 0); if (!p) continue; c.fillStyle = 'rgba(82,199,255,.85)'; c.beginPath(); c.arc(p[0], p[1], 2.5, 0, 7); c.fill(); c.lineWidth = 3; c.strokeStyle = 'rgba(4,7,10,.8)'; c.strokeText(pl.s, p[0], p[1] - 10); c.fillText(pl.s, p[0], p[1] - 10); } }
   // neighbourhoods
@@ -550,6 +566,29 @@ function passby(zk, wet) { const t = AC.currentTime, d = 1.3 + Math.random() * 1
 function airbrake(zk) { const t = AC.currentTime, p = AC.createStereoPanner(); p.pan.value = (Math.random() * 2 - 1) * 0.8; p.connect(amb); tone(t, 0.12, 85, 60, 'sine', 0.05 * zk, 0, p); nz(t + 0.1, 0.7, 4200, 0.5, 'highpass', 0.035 * zk, 0, p); nz(t + 0.9, 0.35, 3000, 0.6, 'highpass', 0.015 * zk, 0, p); }
 function birds(zk) { const t = AC.currentTime, n = 2 + ((Math.random() * 4) | 0), base = 2600 + Math.random() * 2200, p = AC.createStereoPanner(); p.pan.value = (Math.random() * 2 - 1) * 0.9; p.connect(amb);
   for (let i = 0; i < n; i++) { const tt = t + i * (0.09 + Math.random() * 0.12), up = Math.random() < 0.5; tone(tt, 0.07 + Math.random() * 0.05, base * (up ? 0.85 : 1.15), base * (up ? 1.2 : 0.8), 'sine', 0.009 * zk, 0.004, p); } }
+// a North American wail going past: two detuned voices through a horn-ish band, with Doppler (pitch drops as it passes), a pan sweep,
+// and distance as level plus a lowpass. o: { dur, peak, near (0 far .. 1 close), yelp (seconds of yelp at the end), dir, dest }
+function sirenPass(t, o) {
+  const d = o.dur || 7, near = o.near || 0, dir = o.dir || (Math.random() < 0.5 ? -1 : 1), dest = o.dest || amb, cyc = 3.8 + Math.random() * 0.8;
+  const pn = AC.createStereoPanner(); pn.pan.setValueAtTime(-0.9 * dir, t); pn.pan.linearRampToValueAtTime(0.9 * dir, t + d); pn.connect(dest);
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(700 + near * 900, t); lp.frequency.linearRampToValueAtTime(1600 + near * 3600, t + d * 0.5); lp.frequency.linearRampToValueAtTime(600 + near * 700, t + d);
+  const bp = AC.createBiquadFilter(); bp.type = 'peaking'; bp.frequency.value = 1300; bp.gain.value = 6; bp.Q.value = 0.8;
+  const g = AC.createGain(), pk = o.peak || 0.04; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(pk, t + d * 0.48); g.gain.exponentialRampToValueAtTime(pk * 0.6, t + d * 0.62); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  bp.connect(lp); lp.connect(g); g.connect(pn);
+  const yl = o.yelp || 0, end = t + d - yl;
+  for (const [type, det, lv] of [['sawtooth', 0, 0.5], ['square', 9, 0.22]]) { const os = AC.createOscillator(); os.type = type; os.detune.value = det; const og = AC.createGain(); og.gain.value = lv; os.connect(og); og.connect(bp);
+    let tt = t - Math.random() * cyc; os.frequency.setValueAtTime(700, t);
+    while (tt + cyc <= end + 0.01) { const dop = 1.035 - 0.07 * Math.min(1, Math.max(0, (tt - t) / d - 0.1) / 0.8); // approaching = sharp, receding = flat
+      os.frequency.linearRampToValueAtTime(1450 * dop, Math.max(t, tt + cyc * 0.5)); os.frequency.linearRampToValueAtTime(680 * dop, Math.max(t, tt + cyc)); tt += cyc; }
+    for (let y = end + 0.02; y < t + d - 0.3; y += 0.28) { os.frequency.setValueAtTime(760, y); os.frequency.linearRampToValueAtTime(1550, y + 0.14); os.frequency.linearRampToValueAtTime(760, y + 0.28); }
+    os.start(t); os.stop(t + d + 0.05); }
+}
+let distSirT = 25;
+function distantSirens(dt, zoomK) { // the city's emergencies, heard: a far-off siren now and then, more often the more real calls are on scene right now
+  distSirT -= dt; if (distSirT > 0) return; const n = incidents.filter(i => i.type === 'call' && i.state !== 'cleared' && i.act !== 'police_low').length;
+  distSirT = n ? (70 + Math.random() * 90) / Math.min(4, 0.6 + n * 0.35) : 60; if (!n || Math.random() < 0.25) return;
+  sirenPass(AC.currentTime, { dur: 8 + Math.random() * 5, peak: (0.006 + Math.random() * 0.008) * (0.6 + zoomK * 0.4), near: 0 });
+}
 function audioFrame(dt, stoppedOnScreen, carsOnScreen, sirenNear) {
   if (!AC || muted) return; const t = AC.currentTime;
   const zoomK = Math.max(0, Math.min(1, 1.6 - Math.log10(Math.max(1, cam.wpp)) * 0.9));
@@ -562,6 +601,7 @@ function audioFrame(dt, stoppedOnScreen, carsOnScreen, sirenNear) {
   birdT -= dt; if (birdT <= 0) { birdT = 5 + Math.random() * 14; const hr = simT / 3600 % 24; if (zoomK > 0.35 && night < 0.25 && !wetRd && Math.random() < (hr < 10 ? 0.85 : 0.4)) birds(zoomK); }
   rainG.gain.setTargetAtTime(rainOn ? 0.07 : 0, t, 1.0);
   sirenG.gain.setTargetAtTime(sirenNear ? 0.045 * zoomK + 0.01 : 0, t, 0.3); if (sirenNear) { const ph = (t % 2.4) / 2.4; sirenO.frequency.setTargetAtTime(ph < 0.5 ? 1350 : 700, t, 0.35); }
+  try { if (typeof incidents !== 'undefined') distantSirens(dt, zoomK); } catch (e) { console.warn('sirens', e); distSirT = 600; }
   hornT -= dt; if (hornT <= 0) { hornT = 0.4 + Math.random() * 1.6; if (stoppedOnScreen > 25 && zoomK > 0.45 && Math.random() < Math.min(0.9, stoppedOnScreen / 300)) snd('horn'); }
 }
 
@@ -644,5 +684,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { brkTest: k => brkTest(k), brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { brkTest: k => brkTest(k), get labelCand() { return labelCand; }, areaSet: (c, f) => areaSet(c, f), areaHas: (x, y) => areaHas(x, y), get AREA() { return AREA; }, brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();

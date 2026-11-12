@@ -418,13 +418,22 @@ function liveSourcesHtml() {
 // ---------------- My area: type the first three characters of a postal code. The camera flies there, a ring marks the area,
 // and a panel counts what is going on inside it right now. Remembered between visits.
 const AREA = { fsa: store.get('myfsa', null), g: null, open: false, edit: false, msg: '' };
-function areaGeom(code) { // centre and radius (map metres) from the FSA's sample points; the median ignores strays
-  const pts = (LV.stat && LV.stat.fsa && LV.stat.fsa[code]) || []; if (pts.length < 3) return null; const P = G.proj;
+const FSAPOLY = (() => { try { return JSON.parse($('fsapoly').textContent); } catch (e) { return {}; } })();
+const inPoly = (x, y, ring) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+function areaGeom(code) { // the real postal-area outline when we have it; otherwise a circle from the FSA's sample points (the median ignores strays)
+  const P = G.proj, xy = p => [(p[1] - P.lon0) * P.kx, -(p[0] - P.lat0) * P.ky];
+  const rings = (FSAPOLY[code] || []).map(r => r.map(xy)).filter(r => r.length > 2);
+  if (rings.length) { let A = 0, cx = 0, cy = 0; const r0 = rings.reduce((a, b) => a.length >= b.length ? a : b); // centroid of the main part
+    for (let i = 0, j = r0.length - 1; i < r0.length; j = i++) { const f = r0[j][0] * r0[i][1] - r0[i][0] * r0[j][1]; A += f; cx += (r0[j][0] + r0[i][0]) * f; cy += (r0[j][1] + r0[i][1]) * f; }
+    cx /= 3 * A; cy /= 3 * A; let far = 0; for (const r of rings) for (const [x, y] of r) far = Math.max(far, Math.hypot(x - cx, y - cy));
+    return { x: cx, y: cy, r: Math.min(3200, far * 0.75), rings }; }
+  const pts = (LV.stat && LV.stat.fsa && LV.stat.fsa[code]) || []; if (pts.length < 3) return null;
   const xs = pts.map(p => (p[1] - P.lon0) * P.kx), ys = pts.map(p => -(p[0] - P.lat0) * P.ky), med = a => a.slice().sort((p, q) => p - q)[a.length >> 1];
   const x = med(xs), y = med(ys), d = xs.map((v, i) => Math.hypot(v - x, ys[i] - y)).sort((p, q) => p - q);
   return { x, y, r: Math.min(2400, Math.max(700, d[Math.floor(d.length * 0.8)])) };
 }
-function areaCodes() { return Object.keys((LV.stat && LV.stat.fsa) || {}).sort(); }
+const areaHas = (x, y) => { const g = AREA.g; if (!g || x == null) return false; return g.rings ? g.rings.some(r => inPoly(x, y, r)) : (x - g.x) ** 2 + (y - g.y) ** 2 <= g.r * g.r; };
+function areaCodes() { return [...new Set([...Object.keys(FSAPOLY), ...Object.keys((LV.stat && LV.stat.fsa) || {})])].sort(); }
 function areaSet(raw, fly = true) {
   const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
   if (code.length < 3) { AREA.msg = 'Enter the first 3 characters, like M1K.'; areaBar(); return false; }
@@ -435,7 +444,7 @@ function areaSet(raw, fly = true) {
   return true;
 }
 function areaStats() {
-  const g = AREA.g, r2 = g.r * g.r, P = G.proj, now = Date.now() / 1000, within = (x, y) => (x - g.x) ** 2 + (y - g.y) ** 2 <= r2;
+  const g = AREA.g, P = G.proj, now = Date.now() / 1000, within = areaHas;
   const calls = ((LV.feed && LV.feed.calls) || []).filter(c => now - c.ts < 86400 && within((c.lng - P.lon0) * P.kx, -(c.lat - P.lat0) * P.ky));
   const n = f => calls.filter(f).length, hour = calls.filter(c => now - c.ts < 3600).length;
   const live = incidents.filter(i => i.state !== 'cleared' && within(i.x, i.y)), hwy = live.filter(i => i.type === 'hwy').length;
@@ -457,11 +466,16 @@ function areaBar() {
     + `<div class="areaact">${s.cams.length ? `<button type="button" data-cam="${s.cams[0].i}">Nearest camera</button>` : ''}<button type="button" data-area="edit">Change</button><button type="button" data-area="close" aria-label="Close">×</button></div>`;
 }
 function areaRing(c) {
-  if (!(AREA.open || performance.now() < (AREA.ringT || 0)) || !AREA.g || !AREA.fsa) return; const g = AREA.g, p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) return;
-  const rx = Math.hypot(q[0] - p[0], q[1] - p[1]), ry = Math.hypot(q2[0] - p[0], q2[1] - p[1]); if (rx < 30) return; // too far out: the ring would be a speck
-  c.save(); c.setLineDash([8, 8]); c.lineDashOffset = -performance.now() / 80; c.strokeStyle = 'rgba(82,199,255,.8)'; c.fillStyle = 'rgba(82,199,255,.05)'; c.lineWidth = 2;
-  c.beginPath(); c.ellipse(p[0], p[1], rx, ry, 0, 0, 7); c.fill(); c.stroke(); c.restore();
-  c.font = `800 13px ${getMono()}`; c.textAlign = 'center'; c.fillStyle = 'rgba(8,12,17,.85)'; roundRect(c, p[0] - 26, p[1] - ry - 24, 52, 20, 6); c.fill(); c.fillStyle = '#52c7ff'; c.fillText(AREA.fsa, p[0], p[1] - ry - 10);
+  if (!(AREA.open || performance.now() < (AREA.ringT || 0)) || !AREA.g || !AREA.fsa) return; const g = AREA.g;
+  c.save(); c.setLineDash([8, 8]); c.lineDashOffset = -performance.now() / 80; c.strokeStyle = 'rgba(82,199,255,.85)'; c.fillStyle = 'rgba(82,199,255,.06)'; c.lineWidth = 2.5;
+  let top = null;
+  if (g.rings) { c.beginPath(); let ok = false, minX = 1e9, maxX = -1e9;
+    for (const r of g.rings) { let first = true; for (const [x, y] of r) { const q = R.project(x, y, 0); if (!q) continue; if (first) { c.moveTo(q[0], q[1]); first = false; } else c.lineTo(q[0], q[1]); ok = true; minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); if (!top || q[1] < top[1]) top = q; } c.closePath(); }
+    if (!ok || maxX - minX < 40) { c.restore(); return; } c.fill(); c.stroke(); c.restore(); top = R.project(g.x, g.y, 0) ? [R.project(g.x, g.y, 0)[0], top[1]] : top;
+  } else { const p = R.project(g.x, g.y, 0), q = R.project(g.x + g.r, g.y, 0), q2 = R.project(g.x, g.y + g.r, 0); if (!p || !q || !q2) { c.restore(); return; }
+    const rx = Math.hypot(q[0] - p[0], q[1] - p[1]), ry = Math.hypot(q2[0] - p[0], q2[1] - p[1]); if (rx < 30) { c.restore(); return; } // too far out: the ring would be a speck
+    c.beginPath(); c.ellipse(p[0], p[1], rx, ry, 0, 0, 7); c.fill(); c.stroke(); c.restore(); top = [p[0], p[1] - ry]; }
+  if (!top) return; c.font = `800 13px ${getMono()}`; c.textAlign = 'center'; c.fillStyle = 'rgba(8,12,17,.85)'; roundRect(c, top[0] - 26, top[1] - 24, 52, 20, 6); c.fill(); c.fillStyle = '#52c7ff'; c.fillText(AREA.fsa, top[0], top[1] - 10);
 }
 document.addEventListener('click', e => {
   if (e.target.closest && e.target.closest('#areaBtn')) { AREA.open = !AREA.open; AREA.edit = !AREA.g; areaBar(); return; }

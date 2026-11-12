@@ -31,7 +31,7 @@ function pulseItems() {
   PULSE.key = key; return (PULSE.cache = out);
 }
 const inScarb = (lat, lng) => lng > -79.2883 - 0.4075 * (lat - 43.6913) - 0.002; // east of Victoria Park Ave (the feeds cover a box that spills into North York and East York)
-const inArea = it => AREA.g && it.x != null && (it.x - AREA.g.x) ** 2 + (it.y - AREA.g.y) ** 2 <= AREA.g.r * AREA.g.r;
+const inArea = it => areaHas(it.x, it.y);
 
 // ---------------------------------------------------------------- how busy is it, against the same hour of the same weekday over the past weeks
 const scarbCall = c => c.src === 'tps' && inScarb(c.lat, c.lng); // police only: weeks of police history exist, the fire history is too thin to compare against
