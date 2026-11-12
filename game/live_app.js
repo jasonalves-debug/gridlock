@@ -487,6 +487,28 @@ function areaAfterReady() { if (!LV.kind || !AREA.fsa || !LV.stat) return; const
 // shows a permanent ticker. Start it from the TV button, the T key, or the TV tile on the start screen (open the file with #tv to feature it).
 const TV = { on: false, idleT: 0, fsAsked: false };
 const SCENIC = [['Scarborough Town Centre', 43.7764, -79.2577], ['University of Toronto Scarborough', 43.7845, -79.1870], ["Bluffer's Park", 43.7063, -79.2298]];
+// Places the idle tour visits. [title, weight, 'x', streetA, streetB] = that junction · [.., 's', street] = middle of a street · [.., 'p', lat, lng].
+// Titles are plain place names. Where there have been calls nearby in the last 24 h the line under the title says so; the camera never labels a place as a "hot spot".
+const SPOTS = [['Lawrence Ave E & Morningside Ave', 0.9, 'x', 'Lawrence Avenue East', 'Morningside Avenue'], ['Danzig St & Galloway Rd', 0.9, 'x', 'Danzig Street', 'Galloway Road'],
+  ['Lawrence Ave E & Orton Park Rd', 0.9, 'x', 'Lawrence Avenue East', 'Orton Park Road'], ['Lawrence Ave E & Kingston Rd', 0.9, 'x', 'Lawrence Avenue East', 'Kingston Road'],
+  ['Markham Rd & Eglinton Ave E', 0.9, 'x', 'Markham Road', 'Eglinton Avenue East'], ['Kennedy Park', 0.9, 'x', 'Kennedy Road', 'Eglinton Avenue East'],
+  ['Malvern: Empringham Dr', 0.9, 's', 'Empringham Drive'], ['Wexford / Maryvale', 0.9, 'x', 'Lawrence Avenue East', 'Pharmacy Avenue'],
+  ['Mornelle Court', 0.9, 's', 'Mornelle Court'], ['Dorset Park', 0.9, 's', 'Dorset Road'],
+  ['Scarborough Town Centre', 1, 'p', 43.7764, -79.2577], ['Woodside Square', 0.7, 'x', 'Markham Road', 'Sheppard Avenue East'], ['Agincourt Mall', 0.7, 'x', 'Kennedy Road', 'Sheppard Avenue East'],
+  ['Eglinton Square', 0.7, 'x', 'Victoria Park Avenue', 'Eglinton Avenue East'], ['Bridlewood Mall', 0.7, 'x', 'Warden Avenue', 'Finch Avenue East'],
+  ['University of Toronto Scarborough', 1, 'p', 43.7845, -79.1870], ["Bluffer's Park", 1, 'p', 43.7063, -79.2298]];
+let SPOTXY = null;
+function spotXY() { // → [{t, w, x, y}], resolved once against the road graph
+  if (SPOTXY) return SPOTXY; const idx = new Map(G.names.map((n, i) => [n, i])), cache = {}, P = G.proj;
+  const nodes = n => cache[n] || (cache[n] = (() => { const k = idx.get(n), st = new Set(); if (k != null) for (let e = 0; e < G.ea.length; e++) if (G.name[e] === k) { st.add(G.ea[e]); st.add(G.eb[e]); } return [...st]; })());
+  const mean = a => [a.reduce((q, i) => q + G.nx[i], 0) / a.length, a.reduce((q, i) => q + G.ny[i], 0) / a.length];
+  SPOTXY = SPOTS.map(([t, w, m, a, b]) => { let p = null;
+    if (m === 'p') p = [(b - P.lon0) * P.kx, -(a - P.lat0) * P.ky];
+    else if (m === 's') { const A = nodes(a); if (A.length) { const c = mean(A); let best = 1e18; for (const i of A) { const d = (G.nx[i] - c[0]) ** 2 + (G.ny[i] - c[1]) ** 2; if (d < best) { best = d; p = [G.nx[i], G.ny[i]]; } } } }
+    else { const A = nodes(a), B = new Set(nodes(b)), C = A.filter(i => B.has(i)); if (C.length) p = mean(C);
+      else if (A.length && B.size) { let best = 500 * 500; for (const i of A) for (const j of B) { const d = (G.nx[i] - G.nx[j]) ** 2 + (G.ny[i] - G.ny[j]) ** 2; if (d < best) { best = d; p = [(G.nx[i] + G.nx[j]) / 2, (G.ny[i] + G.ny[j]) / 2]; } } } }
+    return p ? { t, w, x: p[0], y: p[1] } : null; }).filter(Boolean);
+  return SPOTXY; }
 let MAPG = null; // where the modelled city actually is: 300 m cells holding road junctions. The map's bounding box is mostly corners with nothing in them.
 const inMap = (x, y) => { if (!MAPG) { MAPG = new Map(); for (let i = 0; i < G.nx.length; i++) { const k = Math.floor(G.nx[i] / 300) * 100003 + Math.floor(G.ny[i] / 300); MAPG.set(k, (MAPG.get(k) || 0) + 1); } }
   const cx = Math.floor(x / 300), cy = Math.floor(y / 300); let full = 0; for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) if ((MAPG.get((cx + ax) * 100003 + cy + ay) || 0) >= 2) full++; return full >= 6; };
@@ -503,12 +525,21 @@ function tvStops() { // everything worth pointing the camera at right now, each 
   for (const i of incidents) { if (i.state === 'cleared' || i.type === 'roadclosed' || !isNews(i)) continue; const [t, s] = DIR.incTitle(i); const H0 = i.type === 'hwy' ? 620 : 420; add('inc', 'i' + i.id, 6, { type: 'orbit', move: 'push', x: i.x, y: i.y, h: H0, pitch: 0.8, dur: 6, spin: spinR(0.03), then: { type: 'orbit', x: i.x, y: i.y, h: H0, pitch: 0.85, dur: 8, spin: spinR(0.07) } }, t, s, ['tv:inc']); }
   for (const [nm, r, x, y] of wl.slow || []) add('slow', 's' + nm, 5 + (1 - r) * 8, flyShot(x, y, 480, 13), nm.toUpperCase(), `Buses at ${Math.round(r * 100)}% of timetable pace`, DIR.has('tr:' + nm) ? ['t:slowon', 'tr:' + nm, 't:busesbehind'] : ['t:slowroad'], 'traffic');
   (wl.hm || []).forEach((m, h) => { if (m >= 1.25) { const H = G.hoods[h]; add('hood', 'h' + h, 2 + (m - 1) * 6, flyShot(H.x, H.y, 1100, 14, 700), H.n.toUpperCase(), 'Buses behind timetable. Traffic likely heavier.', DIR.has('th:' + H.n) ? ['t:latearound', 'th:' + H.n, 't:expect'] : null, 'traffic'); } });
-  { const now = Date.now() / 1000; for (const it of pulseItems()) { if (it.pin || it.x == null || now - it.t > 5400 || !(it.sel || it.hot)) continue; if (incidents.some(i => i.state !== 'cleared' && isNews(i) && Math.hypot(i.x - it.x, i.y - it.y) < 150)) continue; // already covered as an active scene
+  { const now = Date.now() / 1000; for (const it of pulseItems()) { if (it.pin || it.x == null || it.kind === 'road' || now - it.t > 5400 || !(it.sel || it.hot)) continue; if (incidents.some(i => i.state !== 'cleared' && isNews(i) && Math.hypot(i.x - it.x, i.y - it.y) < 150)) continue; // already covered as an active scene
       add('recent', 'r' + it.id, it.hot ? 4 : 1.5, { type: 'orbit', move: 'push', x: it.x, y: it.y, h: 460, pitch: 0.8, dur: 10, spin: spinR(0.04) }, it.title.toUpperCase(), `${it.sub} · ${ago(now - it.t)}`, null); out[out.length - 1].kick = now - it.t < 1800 ? 'JUST IN' : 'EARLIER'; if (out.filter(o => o.kind === 'recent').length >= 4) break; } }
   const cs = cams(); for (let n = 0; n < 8 && cs.length; n++) { const c = cs[(Math.random() * cs.length) | 0]; if (!inMap(c.x, c.y)) continue; add('cam', 'c' + c.name, 2.2, { type: 'orbit', move: 'push', x: c.x, y: c.y, h: 380, pitch: 0.8, dur: 11, spin: spinR(0.02) }, 'CAMERA · ' + c.name.toUpperCase(), c.src === '511' ? 'Ontario 511 traffic camera' : 'City of Toronto traffic camera', ['tv:cam']); }
   const sw = (LV.stat && LV.stat.subway) || {}; for (const k in sw) { const [nm, la, ln] = sw[k], [x, y] = xy(la, ln); if (inMap(x, y)) add('stn', 't' + nm, 0.6, { type: 'orbit', move: 'crane', x, y, h: 420, pitch: 0.85, dur: 11, spin: spinR(0.06) }, nm.toUpperCase() + ' STATION', 'TTC subway', ['tv:stn']); }
-  for (const [nm, la, ln] of SCENIC) { const [x, y] = xy(la, ln); if (inMap(x, y)) add('scenic', 'sc' + nm, 1.3, { type: 'orbit', move: 'crane', x, y, h: 700, pitch: 0.8, dur: 14, spin: spinR(0.035) }, nm.toUpperCase(), night ? 'Scarborough after dark' : 'Scarborough', [night ? 'tv:night' : 'tv:scenic']); }
-  const zs = (LV.zones || []).filter(z => z.on && z.road); for (let n = 0; n < 3 && zs.length; n++) { const z = zs[(Math.random() * zs.length) | 0]; add('work', 'z' + z.id, 1.4, flyShot(z.x, z.y, 460, 11, 260), 'ROAD WORK · ' + String(z.road).toUpperCase(), String(z.why || 'Work zone').slice(0, 80), ['tv:work']); }
+  { const calls24 = h24calls(); for (const sp of spotXY()) { if (!inMap(sp.x, sp.y)) continue; const n = calls24.filter(o => Math.hypot(o.x - sp.x, o.y - sp.y) < 350).length;
+      add('scenic', 'sc' + sp.t, sp.w * (1 + Math.min(n, 4) * 0.6), { type: 'orbit', move: 'crane', x: sp.x, y: sp.y, h: 600, pitch: 0.82, dur: 13, spin: spinR(0.035) }, sp.t.toUpperCase(), n ? `${n} call${n > 1 ? 's' : ''} nearby in the last 24 hours` : night ? 'Scarborough after dark' : 'Scarborough', [night ? 'tv:night' : 'tv:scenic']); } }
+  { const now = Date.now() / 1000, live = incidents.some(i => i.state !== 'cleared' && isNews(i)), tz = { timeZone: 'America/Toronto' }; // serious calls from earlier in the last 24 h (the busy part is often overnight)
+    const day = t => new Date(t * 1000).toLocaleDateString('en-CA', tz), hr = t => +new Date(t * 1000).toLocaleString('en-CA', { ...tz, hour: 'numeric', hour12: false }) % 24;
+    const serious = h24calls().map(o => o.c).filter(c => now - c.ts > 5400 && (c.src === 'tps' ? (c.sev === 'critical' || c.sev === 'high' || /^(PERKN|PERGU|SOUGU|ASS|ASSJU|ASSPR|BREEN|BREJU|BREPR|ROB)$/.test(c.code || '')) : ['fire_struct', 'gas', 'crash3'].includes(c.act)))
+      .sort((a, b) => (b.sev === 'critical') - (a.sev === 'critical') || b.ts - a.ts).slice(0, 8);
+    for (const c of serious) { const p = [(c.lng - G.proj.lon0) * G.proj.kx, -(c.lat - G.proj.lat0) * G.proj.ky]; if (incidents.some(i => i.state !== 'cleared' && isNews(i) && Math.hypot(i.x - p[0], i.y - p[1]) < 150)) continue;
+      const h = hr(c.ts), k = h < 6 || h >= 22 ? 'OVERNIGHT' : day(c.ts) === day(now) ? 'EARLIER TODAY' : 'YESTERDAY';
+      add('replay', 'rp' + c.id, (live ? 1 : 3.5) * (c.sev === 'critical' ? 1.5 : 1), { type: 'orbit', move: 'push', x: p[0], y: p[1], h: 460, pitch: 0.8, dur: 10, spin: spinR(0.04) }, String(c.label || 'Police call').toUpperCase(),
+        `${c.loc || 'Scarborough'} · ${new Date(c.ts * 1000).toLocaleTimeString('en-CA', { ...tz, hour: 'numeric', minute: '2-digit' })} · ${ago(now - c.ts)}`, null); out[out.length - 1].kick = k; } }
+  const zs = (LV.zones || []).filter(z => z.on && z.road); for (let n = 0; n < 1 && zs.length; n++) { const z = zs[(Math.random() * zs.length) | 0]; add('work', 'z' + z.id, 0.3, flyShot(z.x, z.y, 460, 11, 260), 'ROAD WORK · ' + String(z.road).toUpperCase(), String(z.why || 'Work zone').slice(0, 80), ['tv:work']); }
   if (AREA.g && AREA.fsa) { const s = areaStats(); add('home', 'home', 3.5, { type: 'orbit', x: AREA.g.x, y: AREA.g.y, h: Math.min(4400, Math.max(1700, AREA.g.r * 3)), pitch: 0.9, dur: 12, spin: 0.05 }, 'HOME WATCH · ' + AREA.fsa, `${s.onScene} calls on scene · ${s.total} in the last 24 hours`, ['t:homecheck', 'tf:' + AREA.fsa, s.onScene ? 't:homebusy' : 't:home0'], 'traffic'); }
   if (envDusk() > 0.45) { const am = simT / 3600 % 24 < 12, [bx, by] = xy(SCENIC[2][1], SCENIC[2][2]), at = inMap(bx, by) ? [bx, by] : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
     add('sun', 'sun' + Math.floor(Date.now() / 1.2e6), 16, { type: 'orbit', move: 'crane', x: at[0], y: at[1], h: 520, pitch: 0.95, dur: 16, spin: spinR(0.03), nopip: true }, am ? 'SUNRISE OVER SCARBOROUGH' : 'SUNSET OVER SCARBOROUGH', clock(simT, true), [am ? 'tv:sunrise' : 'tv:sunset']); }
