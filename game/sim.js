@@ -148,7 +148,7 @@ function createSim(G, opts) {
   const cNext = new Int32Array(CAP), cDest = new Int16Array(CAP), cLive = new Uint8Array(CAP), cType = new Uint8Array(CAP), cLen = new Float32Array(CAP);
   const cAhead = new Int32Array(CAP), cBehind = new Int32Array(CAP), cTick = new Int32Array(CAP), cWait = new Float32Array(CAP), cWaitStart = new Float32Array(CAP);
   const cEnter = new Float32Array(CAP), cStart = new Float32Array(CAP), cFree = new Float32Array(CAP), cDrv = new Float32Array(CAP), cLc = new Float32Array(CAP);
-  const cYield = new Float32Array(CAP), cPull = new Float32Array(CAP), cEsc = new Uint8Array(CAP), cWhy = new Uint8Array(CAP), cGrant = new Float32Array(CAP), cLat = new Float32Array(CAP), cOrigH = new Int16Array(CAP), cDestH = new Int16Array(CAP), cStuck = new Float32Array(CAP), cColor = new Uint8Array(CAP), cBrake = new Uint8Array(CAP), cLost = new Uint8Array(CAP);
+  const cHold = new Float32Array(CAP), cOff = new Uint8Array(CAP), cYield = new Float32Array(CAP), cPull = new Float32Array(CAP), cEsc = new Uint8Array(CAP), cWhy = new Uint8Array(CAP), cGrant = new Float32Array(CAP), cLat = new Float32Array(CAP), cOrigH = new Int16Array(CAP), cDestH = new Int16Array(CAP), cStuck = new Float32Array(CAP), cColor = new Uint8Array(CAP), cBrake = new Uint8Array(CAP), cLost = new Uint8Array(CAP);
   const cRoute = new Int32Array(CAP), cRi = new Int32Array(CAP), cStopS = new Float32Array(CAP).fill(-1), cDwell = new Float32Array(CAP), cPark = new Uint8Array(CAP); // scripted trips (world_trips.js)
   const freeList = []; for (let i = CAP - 1; i >= 0; i--) freeList.push(i);
   let nCars = 0;
@@ -194,7 +194,7 @@ function createSim(G, opts) {
     if (laneBlock[ln] >= 0 && Math.abs(laneBlock[ln] - s) < 15) return -1;
     const c = freeList.pop(); alive[c] = 1; nCars++;
     cEdge[c] = e; cLane[c] = lane; cS[c] = s; cV[c] = 0; cType[c] = type; cLen[c] = len; cDest[c] = dest; cLive[c] = live ? 1 : 0;
-    cDrv[c] = 0.88 + rand() * 0.24; cGrant[c] = 0; cEsc[c] = 0; cYield[c] = 0; cPull[c] = 0; cWait[c] = 0; cWaitStart[c] = 0; cLc[c] = rand() * 2; cLat[c] = lane; cStuck[c] = 0; cLost[c] = 0; cBrake[c] = 0;
+    cDrv[c] = 0.88 + rand() * 0.24; cGrant[c] = 0; cEsc[c] = 0; cYield[c] = 0; cHold[c] = 0; cOff[c] = 0; cPull[c] = 0; cWait[c] = 0; cWaitStart[c] = 0; cLc[c] = rand() * 2; cLat[c] = lane; cStuck[c] = 0; cLost[c] = 0; cBrake[c] = 0;
     cRoute[c] = 0; cStopS[c] = -1; cPark[c] = 0; cOrigH[c] = origH; cDestH[c] = D[dest].kind === 'hood' || D[dest].kind === 'place' ? D[dest].hood : -1; cColor[c] = (rand() * 255) | 0;
     cEnter[c] = simT; cStart[c] = simT; const fd = distHab[dest * N + eB[e]]; cFree[c] = (fd < 1e8 ? fd : 600) + (eLen[e] - s) / eVmax[e];
     lInsertByS(c, ln); cTick[c] = tick;
@@ -285,7 +285,7 @@ function createSim(G, opts) {
           cTick[c] = tick;
           const p = IDM[cType[c] === T_TRUCK ? 1 : 0];
           const L = eLen[e]; const s = cS[c], v = cV[c];
-          let v0 = Math.min(eVmax[e] * cDrv[c], edgeVcap[e], cEsc[c] ? 3 : 99, cYield[c] > simT ? 2.5 : 99, spotFlag[e] ? spotCap(e, s) : 99) * wv;
+          let v0 = Math.min(eVmax[e] * cDrv[c], edgeVcap[e], cEsc[c] ? 3 : 99, cYield[c] > simT ? 2.5 : 99, cHold[c] > simT ? 0.05 : 99, spotFlag[e] ? spotCap(e, s) : 99) * wv;
           let gap = 1e9, dv = 0, atLine = false;
           const ah = cAhead[c];
           if (ah >= 0) { gap = cS[ah] - cLen[ah] - s; dv = v - cV[ah]; }
@@ -640,10 +640,51 @@ function createSim(G, opts) {
     pool.police--; ev({ k: 'policeSent', ctrl: ctl, name: ctrlName(ctl), unit: sp.id }); return { ok: true };
   }
   function recallPolice(ctl) { const u = specials.find(s => s.kind === 'police' && s.ctrl === ctl && s.state === 'working'); if (u) { u.until = simT; } }
+
+  // ---------------- officers the player sends to any road: checkpoint (stops cars one at a time), detour (closes the road), traffic stop (pulls one car over), speed trap (ticket speeders)
+  const OFF_JOBS = { checkpoint: { name: 'Checkpoint', dur: 12 * 60 }, detour: { name: 'Detour', dur: 15 * 60 }, pullover: { name: 'Traffic stop', dur: 4 * 60 }, speedtrap: { name: 'Speed trap', dur: 10 * 60 } };
+  function edgeS(e, x, y) { let bs = 0, bd = 1e18; for (let s = 0; s <= eLen[e]; s += 4) { const [px, py] = posOnEdge(e, s, 0), d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; bs = s; } } return bs; }
+  function sendOfficer(e, x, y, mode) {
+    const job = OFF_JOBS[mode]; if (!job) return { ok: false, msg: 'Unknown job' };
+    if (eCls[e] <= 1) return { ok: false, msg: 'The OPP handles highways. Pick a city street.' };
+    const there = specials.find(u => u.officer && u.state !== 'done' && (u.e0 === e || u.e0 === revEdge[e]));
+    if (there) { if (there.state === 'working') there.until = simT; else there.cancel = true; return { ok: true, recalled: true }; }
+    if (pool.police <= 0) return { ok: false, msg: 'All officers are busy' };
+    const s0 = Math.max(6, Math.min(eLen[e] - 6, edgeS(e, x, y))), [sx, sy] = posOnEdge(e, s0, 0), dep = nearestDepot('police', sx, sy);
+    const sp = startSpecial('police', dep, sx, sy, (u) => {
+      if (u.cancel) { u.state = 'done'; pool.police++; return; }
+      const [ux, uy, ua] = posOnEdge(e, s0, laneLat(e, eLanes[e] - 1)); u.state = 'working'; u.x = ux; u.y = uy; u.ang = ua + (mode === 'detour' ? Math.PI / 2 : 0.35); u.until = simT + job.dur; u.onT = simT; u.nextCheck = 0;
+      if (mode === 'detour') { const inc = makeRoadClosed(e, 'roadclosed'); u.closeInc = inc.id; api.sign(sx, sy, 350); }
+      if (mode === 'pullover') { let best = -1, bd = 250 * 250; for (let c = 0; c < CAP; c++) { if (!alive[c] || cHold[c] > simT || cRoute[c]) continue; const [px, py] = posOnEdge(cEdge[c], cS[c], 0), d = (px - sx) ** 2 + (py - sy) ** 2; if (d < bd) { bd = d; best = c; } }
+        if (best < 0) { u.until = simT + 15; u.quietRoad = true; } else { cHold[best] = simT + 40; cYield[best] = simT + 42; u.stopped = 1; u.until = simT + 48; } }
+      ev({ k: 'officerOn', x: sx, y: sy, edge: e, s: s0, mode, job: job.name, name: edgeName(e), unit: u.id, mins: Math.round((simT - u.t0) / 60), quiet: !!u.quietRoad });
+    }, { officer: true, mode, e0: e, s0, stopped: 0, tickets: 0, checked: 0, heldCar: -1 });
+    if (!sp) return { ok: false, msg: 'Officer cannot reach that spot' };
+    pool.police--; ev({ k: 'officerSent', mode, job: job.name, name: edgeName(e), unit: sp.id }); return { ok: true };
+  }
+  function stepOfficers() {
+    for (const u of specials) {
+      if (!u.officer || u.state === 'done') continue;
+      if (u.state === 'working') {
+        const e = u.e0, uid = u.id & 255;
+        if (simT >= u.until) { // packing up: release anyone held, reopen a detour, report
+          if (u.heldCar >= 0) cHold[u.heldCar] = 0; if (u.closeInc !== undefined) { const inc = incidents.find(i => i.id === u.closeInc); if (inc && inc.state !== 'cleared') clearIncident(inc, 'reopened'); }
+          u.state = 'done'; pool.police++; ev({ k: 'officerOff', unit: u.id, mode: u.mode, job: OFF_JOBS[u.mode].name, name: edgeName(e), stopped: u.stopped, tickets: u.tickets, checked: u.checked, mins: Math.round((simT - u.onT) / 60), quiet: !!u.quietRoad }); continue; }
+        if (u.mode === 'checkpoint') {
+          if (u.heldCar >= 0 && (!alive[u.heldCar] || cHold[u.heldCar] <= simT)) u.heldCar = -1;
+          if (u.heldCar < 0) { let best = -1, bs = -1; for (let l = 0; l < eLanes[e]; l++) for (let c = laneHead[laneOf(e, l)]; c >= 0; c = cBehind[c]) { if (cS[c] > u.s0 - 3) continue; if (cS[c] < u.s0 - 60) break; if (cOff[c] === uid || cRoute[c]) continue; if (cS[c] > bs) { bs = cS[c]; best = c; } }
+            if (best >= 0) { const h = 4 + rand() * 4; cHold[best] = simT + h; cYield[best] = simT + h + 1.5; cOff[best] = uid; u.heldCar = best; u.stopped++; } }
+        } else if (u.mode === 'speedtrap') {
+          for (let l = 0; l < eLanes[e]; l++) for (let c = laneHead[laneOf(e, l)]; c >= 0; c = cBehind[c]) { if (cS[c] > u.s0 + 8) continue; if (cS[c] < u.s0 - 14) break; if (cOff[c] === uid) continue; cOff[c] = uid; u.checked++;
+            if (cV[c] > eVmax[e] * 1.025 && !cRoute[c]) { u.tickets++; u.stopped++; cHold[c] = simT + 9; cYield[c] = simT + 10; ev({ k: 'officerTicket', n: u.tickets, kmh: Math.round(cV[c] * 3.6), lim: Math.round(eVmax[e] * 3.6), name: edgeName(e) }); } }
+        }
+      }
+    }
+  }
   function stepUnits() {
     for (let i = specials.length - 1; i >= 0; i--) {
       const u = specials[i];
-      if (u.state === 'working' && u.kind === 'police' && simT >= u.until) { ctrlPolice[u.ctrl] = 0; pool.police++; u.state = 'done'; ev({ k: 'policeOff', ctrl: u.ctrl, name: ctrlName(u.ctrl) }); }
+      if (u.state === 'working' && u.kind === 'police' && !u.officer && simT >= u.until) { ctrlPolice[u.ctrl] = 0; pool.police++; u.state = 'done'; ev({ k: 'policeOff', ctrl: u.ctrl, name: ctrlName(u.ctrl) }); }
       if (u.state === 'working' && u.inc && !u.responder) { const inc = incidents.find(x => x.id === u.inc); if (!inc || inc.state === 'cleared') { u.state = 'done'; pool[u.kind]++; } else if (simT >= inc.workUntil) { clearIncident(inc, 'crew'); u.state = 'done'; pool[u.kind]++; } }
       if (u.prop && simT >= u.until) u.state = 'done';
       if (u.state === 'arrived' && u.kind === 'ems') { u.state = 'done'; }
@@ -730,7 +771,7 @@ function createSim(G, opts) {
   let treeAcc = 0, secAcc = 0;
   function step() {
     tick++; simT += DT;
-    stepCars(); laneChanges(); stepSpecials();
+    stepCars(); laneChanges(); stepSpecials(); stepOfficers();
     // stats from this step's crossing observations
     for (let i = 0; i < exitObs.length; i += 2) { const e = exitObs[i], t = exitObs[i + 1]; ttEma[e] = ttEma[e] * 0.75 + t * 0.25; if (eCtrl[e] >= 0) { ctrlCnt[eCtrl[e]]++; ctrlTot[eCtrl[e]]++; } }
     exitObs.length = 0;
@@ -790,7 +831,7 @@ function createSim(G, opts) {
     init() { updateCosts(false); for (let d = 0; d < ND; d++) { if (D[d].kind === 'special') continue; buildTree(d, costHab, nextHab, distHab); } updateCosts(true); for (let d = 0; d < ND; d++) if (D[d].kind !== 'special') buildTree(d, costLive, nextLive, distLive); if (mode === 'shift' && !opts.noIncidents) setupShift(); },
     addProps(list, secs) { for (const p of list) specials.push({ id: unitSeq++, kind: p.kind, d: -1, e: 0, s: 0, v: 0, x: p.x, y: p.y, ang: p.ang, state: 'onscene', t0: simT, onT: simT, prop: true, until: simT + secs }); return list.length; }, // breaking-news scenes: parked emergency vehicles that leave by themselves
     setTargetCars(n) { targetCars = n; }, setTime(t) { simT = t; }, setMode(m, prof) { mode = m; if (prof) whatifProfile = prof; },
-    dispatch, sendPolice, recallPolice,
+    dispatch, sendPolice, recallPolice, sendOfficer,
     setSplit(ctl, split) { ctrlSplit[ctl] = Math.max(0.2, Math.min(0.8, split)); ev({ k: 'retimed', ctrl: ctl, name: ctrlName(ctl), split: ctrlSplit[ctl] }); return { ok: true }; },
     getSignal(ctl) { const appr = ctrlAppr[ctl]; const names = [new Set(), new Set()]; for (const e of appr) if (eName[e] >= 0) names[eGrp[e]].add(G.names[eName[e]]); let q = [0, 0]; for (const e of appr) for (let l = 0; l < eLanes[e]; l++) for (let k = laneHead[laneOf(e, l)]; k >= 0 && eLen[e] - cS[k] < 150; k = cBehind[k]) if (cV[k] < 2) q[eGrp[e]]++; return { ctrl: ctl, name: ctrlName(ctl), split: ctrlSplit[ctl], cycle: ctrlCycle[ctl], g0: [...names[0]].join(' / ') || 'Main road', g1: [...names[1]].join(' / ') || 'Cross street', q, police: ctrlPolice[ctl], dark: ctrlDark[ctl], flow: Math.round(ctrlFlow[ctl]), count: G.ctrls[ctl].count >= 0 ? G.counts[G.ctrls[ctl].count] : null }; },
     closeRoad(e) { const exh = incidents.find(i => i.type === 'hwy' && !i.crash && i.state !== 'cleared' && i.blocks.some(b => b.e === e)); if (exh) { clearIncident(exh, 'reopened'); return { ok: true, reopened: true }; }

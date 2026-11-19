@@ -13,6 +13,7 @@ const IC = {
   collision: '<path d="M4 15l2-5h6l2 5M4 15h10v3H4zM6 18v1.5M12 18v1.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/><path d="M14 8l2.2-3.6M17 10l3.6-1.4M15.4 11.6l3.2 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   power: '<path d="M13 2L5 13h6l-1 9 8-11h-6z" fill="currentColor"/>',
   water: '<path d="M12 3c3.5 4.6 6 8 6 11a6 6 0 0 1-12 0c0-3 2.5-6.4 6-11z" fill="currentColor"/><path d="M9 15a3 3 0 0 0 3 3" stroke="#000" stroke-opacity=".35" stroke-width="1.6" fill="none" stroke-linecap="round"/>',
+  police: '<rect x="3" y="12" width="18" height="6" rx="2.2" fill="currentColor"/><rect x="8" y="7.5" width="8" height="4" rx="1" fill="currentColor"/><path d="M12 2.5v2.4M7.2 4.2l1.4 1.8M16.8 4.2l-1.4 1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/><circle cx="7.5" cy="18.2" r="1.7" fill="currentColor" stroke="#000" stroke-opacity=".5"/><circle cx="16.5" cy="18.2" r="1.7" fill="currentColor" stroke="#000" stroke-opacity=".5"/>',
   closure: '<path d="M12 2l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V5z" fill="currentColor"/><path d="M8.5 12l2.4 2.4 4.6-5" stroke="#000" stroke-opacity=".45" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   flood: '<path d="M3 9c2 0 2-1.5 4.5-1.5S10 9 12 9s2-1.5 4.5-1.5S19 9 21 9M3 14c2 0 2-1.5 4.5-1.5S10 14 12 14s2-1.5 4.5-1.5S19 14 21 14M3 19c2 0 2-1.5 4.5-1.5S10 19 12 19s2-1.5 4.5-1.5S19 19 21 19" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>',
   barricade: '<rect x="3" y="7" width="18" height="6" rx="1" fill="currentColor"/><path d="M7 7l-3 6M12 7l-3 6M17 7l-3 6M21 8l-2.5 5" stroke="#000" stroke-opacity=".5" stroke-width="1.6"/><path d="M6 13v6M18 13v6" stroke="currentColor" stroke-width="1.8"/>',
@@ -172,6 +173,10 @@ function onEvent(e) {
     case 'arrived': snd('radio'); toast('CREW', `${e.kind === 'tow' ? 'Tow truck' : e.kind === 'hydro' ? 'Toronto Hydro' : 'Toronto Water'} on scene at ${e.inc.name} after ${e.mins} min. Work underway.`, 'var(--amber)'); break;
     case 'cleared': if (e.why === 'reset') break; if (e.inc.type === 'roadclosed') break; snd('clear'); if (e.inc.type === 'call' && !(e.inc.act === 'police_crit' || e.inc.act === 'fire_struct' || e.inc.act === 'gas')) break; toast('CLEAR', `${im(e.inc).name} on ${e.inc.name} is cleared${e.why === 'crew' ? '' : ''}. Traffic will recover.`, 'var(--green)'); break;
     case 'policeSent': snd('radio'); break;
+    case 'officerSent': snd('radio'); toast('POLICE', `${e.job} on its way to ${e.name}.`, 'var(--cyan)'); break;
+    case 'officerOn': pcOn(e); toast('POLICE', e.quiet ? `Nobody to pull over on ${e.name} right now. Officer heading back.` : `${e.job} set up on ${e.name} (${e.mins} min to arrive).`, 'var(--cyan)'); break;
+    case 'officerTicket': if (e.n <= 3 || e.n % 5 === 0) toast('TICKET', `${e.kmh} km/h in a ${e.lim} on ${e.name}. Ticket #${e.n}.`, 'var(--amber)'); break;
+    case 'officerOff': pcOff(e); toast('POLICE', e.mode === 'checkpoint' ? `Checkpoint on ${e.name} wrapped up: ${e.stopped} cars stopped in ${e.mins} min.` : e.mode === 'speedtrap' ? `Speed trap on ${e.name} done: ${e.checked} cars checked, ${e.tickets} ticket${e.tickets === 1 ? '' : 's'}.` : e.mode === 'detour' ? `Detour on ${e.name} ended. The road is open again.` : e.quiet ? `Officer back on patrol.` : `Traffic stop on ${e.name} finished.`, 'var(--cyan)'); break;
     case 'policeOn': toast('POLICE', `Officer directing traffic at ${e.name} (arrived in ${e.mins} min).`, 'var(--cyan)'); break;
     case 'policeOff': toast('POLICE', `Officer at ${e.name} is back on patrol.`, 'var(--cyan)'); break;
     case 'complaint': snd('phone'); toast('311', e.lvl === 1 ? `${e.hood}: residents report heavy cut-through traffic${e.street ? ' on ' + e.street : ''}.` : `${e.hood} is furious. Residents say they'll block ${e.street || 'the street'} themselves.`, 'var(--violet)', () => select({ k: 'hood', h: e.h })); break;
@@ -216,9 +221,14 @@ function buildHud() {
   if (mode === 'whatif') tools.splice(4, 0, ['cause', 'Cause trouble']);
   tools.forEach(([k, l], i) => { const b = document.createElement('button'); b.className = 'tool' + (i === 0 || i === 2 ? ' sep' : ''); b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(k === 'cause' ? 'crash' : k); b.onclick = () => onTool(k); tr.appendChild(b); });
   const cr = $('causeRow'); cr.innerHTML = '';
-  for (const [k, l, ic] of [['crash', 'Crash', 'collision'], ['water', 'Water main', 'water'], ['closure', 'Police closure', 'closure'], ['power', 'Power cut', 'power'], ['rain', 'Storm', 'rain'], ['close', 'Close road', 'roadclosed']]) { const b = document.createElement('button'); b.className = 'tool cause'; b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(ic); b.onclick = () => onTool(k); cr.appendChild(b); }
+  for (const [k, l, ic] of [['crash', 'Crash', 'collision'], ['water', 'Water main', 'water'], ['closure', 'Police closure', 'closure'], ['power', 'Power cut', 'power'], ['rain', 'Storm', 'rain'], ['close', 'Close road', 'roadclosed'], ['police', 'Send police', 'police']]) { const b = document.createElement('button'); b.className = 'tool cause'; b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(ic); b.onclick = () => onTool(k); cr.appendChild(b); }
+  const pr = $('polRow'); pr.innerHTML = '';
+  for (const [k, l] of POL_MODES) { const b = document.createElement('button'); b.type = 'button'; b.dataset.m = k; b.textContent = l; b.onclick = () => { polMode = k; snd('ui'); syncTools(); }; pr.appendChild(b); }
   syncTools();
 }
+const POL_MODES = [['checkpoint', 'Checkpoint'], ['detour', 'Detour'], ['pullover', 'Pull over'], ['speedtrap', 'Speed trap']];
+const POL_HINT = { checkpoint: 'Tap a road. An officer stops cars one at a time.', detour: 'Tap a road. An officer closes it and sends drivers around.', pullover: 'Tap a road. An officer pulls one car over.', speedtrap: 'Tap a road. An officer ticks speeders. Tap again to recall.' };
+let polMode = 'checkpoint';
 let panelTimer = 0;
 function closePanels() { for (const [p, b] of [['chips', 'statBtn'], ['feed', 'incBtn']]) { $(p).hidden = true; $(b).setAttribute('aria-expanded', 'false'); } clearTimeout(panelTimer); layout(); }
 function togglePanel(id, btn) { // stats row and incident list: open on tap, close on a second tap or a touch on the map (stats also close themselves)
@@ -229,14 +239,15 @@ function togglePanel(id, btn) { // stats row and incident list: open on tap, clo
 }
 function syncTools() {
   document.querySelectorAll('.tool').forEach(b => { const k = b.id.slice(5); let on = k === tool; if (k === 'traffic') on = overlayOn; if (k === 'tilt') on = tiltGoal > 0.1; if (k === 'cause') on = !$('causeRow').hidden; if (k === 'rain') on = !!rainOn; if (b.id === 'h24Btn') on = H24.on; if (b.id === 'areaBtn') on = AREA.open; if (b.id === 'tvBtn') on = TV.on; b.setAttribute('aria-pressed', String(on)); });
-  const hints = { local: 'Tap a neighbourhood street to make it local traffic only. Tap again to remove.', sign: 'Tap where drivers should see a warning sign. They will reroute.', crash: 'Tap a road to cause a crash.', water: 'Tap a road to break a water main under it.', closure: 'Tap an intersection to have police close it.', power: 'Tap a spot to cut the power there.', close: 'Tap a road to close or reopen it.' };
+  const hints = { local: 'Tap a neighbourhood street to make it local traffic only. Tap again to remove.', sign: 'Tap where drivers should see a warning sign. They will reroute.', crash: 'Tap a road to cause a crash.', water: 'Tap a road to break a water main under it.', closure: 'Tap an intersection to have police close it.', power: 'Tap a spot to cut the power there.', close: 'Tap a road to close or reopen it.', police: POL_HINT[polMode] };
+  $('polRow').hidden = tool !== 'police'; $('polRow').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === polMode)));
   const h = $('hint'); if (hints[tool]) { h.textContent = hints[tool]; h.hidden = false; } else h.hidden = true;
 }
 function onTool(k) {
   snd('ui');
   if (k === 'traffic') { overlayOn = !overlayOn; return syncTools(); }
   if (k === 'tilt') { tiltGoal = tiltGoal > 0.1 ? 0 : 0.78; return syncTools(); }
-  if (k === 'cause') { $('causeRow').hidden = !$('causeRow').hidden; if ($('causeRow').hidden && ['crash', 'water', 'closure', 'power', 'close'].includes(tool)) tool = 'inspect'; return syncTools(); }
+  if (k === 'cause') { $('causeRow').hidden = !$('causeRow').hidden; if ($('causeRow').hidden && ['crash', 'water', 'closure', 'power', 'close', 'police'].includes(tool)) tool = 'inspect'; return syncTools(); }
   if (k === 'rain') { cmd('toggleRain').then(r => { rainOn = r.v; syncTools(); }); return; }
   tool = tool === k ? 'inspect' : k; closeSheet(); syncTools();
 }
@@ -391,6 +402,7 @@ function onTap(px, py) {
   if (tool === 'sign') { placeSign(x, y); return; }
   if (tool === 'power') { cmd('causePower', x, y).then(r => r.ok === false && toast('OPS', r.msg, 'var(--red)')); return; }
   if (tool === 'crash' || tool === 'water' || tool === 'close') { const n = nearestRoad(x, y, 30 * cam.wpp + 25, e => tool === 'close' || G.cls[e] <= 4); if (!n) { toast('OPS', 'Tap closer to a road.', 'var(--muted)'); return; } cmd(tool === 'crash' ? 'causeCrash' : tool === 'water' ? 'causeWater' : 'closeRoad', n.e).then(r => r && r.ok === false && toast('OPS', r.msg, 'var(--red)')); snd('ui'); return; }
+  if (tool === 'police') { const n = nearestRoad(x, y, 30 * cam.wpp + 25, e => G.cls[e] > 1); if (!n) { toast('OPS', 'Tap closer to a city street.', 'var(--muted)'); return; } cmd('sendOfficer', n.e, x, y, polMode).then(r => r && (r.ok === false ? toast('OPS', r.msg, 'var(--red)') : r.recalled && toast('POLICE', 'Officer recalled.', 'var(--cyan)'))); snd('ui'); return; }
   if (tool === 'closure') { const c = pickCtrl(px, py, 40); if (c < 0) { toast('OPS', 'Tap a signalised intersection.', 'var(--muted)'); return; } cmd('causeClosure', c); return; }
   // inspect
   const inc = pickIncident(px, py); if (inc) { select({ k: 'inc', id: inc.id }); snd('ui'); return; }
@@ -432,7 +444,7 @@ function buildSprites(dt) {
   liveSpritesA(put);
   for (const i of act) if (i.type === 'hwy' && i.blocks) for (const b of i.blocks) { const p = pts(b.e); const tot = G.len[b.e]; const pos = posAlong(p, Math.max(2, b.s - 28)); const pos2 = posAlong(p, Math.min(tot, b.s + 1)); const ang = Math.atan2(pos2[1] - pos[1], pos2[0] - pos[0]); put(pos[0], pos[1], 0.3, G.lanes[b.e] * 1.8 + 1.5, 6, 1, 6, -(ang + Math.PI / 2)); }
   DIR.heliSprites(put, 'shadow');
-  brkSpritesA(put);
+  brkSpritesA(put); pcSprites(put);
   const aN = n;
   // B: additive
   const t = performance.now() / 1000;
@@ -685,5 +697,5 @@ function frame(now) {
   audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { brkTest: k => brkTest(k), spotXY: () => spotXY(), tvStops: () => tvStops().map(s => ({ kind: s.kind, key: s.key, w: +s.w.toFixed(2), title: s.title, sub: s.sub, kick: s.kick })), inMap: (x, y) => inMap(x, y), get labelCand() { return labelCand; }, areaSet: (c, f) => areaSet(c, f), areaHas: (x, y) => areaHas(x, y), get AREA() { return AREA; }, brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { pcTest: m => { const n = nearestRoad(cam.x, cam.y, 3000, e => G.cls[e] > 1); if (!n) return 'noroad'; cmd('sendOfficer', n.e, cam.x, cam.y, m); return n.e; }, get PC() { return PC; }, brkTest: k => brkTest(k), spotXY: () => spotXY(), tvStops: () => tvStops().map(s => ({ kind: s.kind, key: s.key, w: +s.w.toFixed(2), title: s.title, sub: s.sub, kick: s.kick })), inMap: (x, y) => inMap(x, y), get labelCand() { return labelCand; }, areaSet: (c, f) => areaSet(c, f), areaHas: (x, y) => areaHas(x, y), get AREA() { return AREA; }, brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();
