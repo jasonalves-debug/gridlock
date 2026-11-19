@@ -152,7 +152,7 @@ function onWorker(m) {
   else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; $('tvBtn').hidden = !LV.kind; if (LV.tvNext) { LV.tvNext = false; setTimeout(() => tvSet(true, false), 300); } if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; $('start').hidden = true; $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
   else if (d.type === 'frame') {
     frameWaiting = false; spareBuf = posBuf; posBuf = d.buf; frameN = d.n; simT = d.t; rainOn = d.rain; snowOn = d.snow; fogOn = d.fog; stormOn = d.storm; onWorld(d);
-    if (d.spd) { R.setSpeeds(d.spd, d.cut); R.setSignals(d.sig); summary = d.summary; incidents = d.incidents; units = d.units; pool = d.summary.pool; updateHud(); updateFeed(); refreshSheet(); try { DIR.onSlow(); } catch (err) { console.error(err); } }
+    if (d.spd) { R.setSpeeds(d.spd, d.cut); R.setSignals(d.sig); summary = d.summary; incidents = d.incidents; units = d.units; pool = d.summary.pool; updateHud(); updateFeed(); refreshSheet(); try { DIR.onSlow(); } catch (err) { console.error(err); } chSlow(d.pursuit); }
   }
   else if (d.type === 'events') d.events.forEach(onEvent);
   else if (d.type === 'reply') { const r = pending.get(d.id); pending.delete(d.id); r && r(d.r); }
@@ -173,6 +173,7 @@ function onEvent(e) {
     case 'arrived': snd('radio'); toast('CREW', `${e.kind === 'tow' ? 'Tow truck' : e.kind === 'hydro' ? 'Toronto Hydro' : 'Toronto Water'} on scene at ${e.inc.name} after ${e.mins} min. Work underway.`, 'var(--amber)'); break;
     case 'cleared': if (e.why === 'reset') break; if (e.inc.type === 'roadclosed') break; snd('clear'); if (e.inc.type === 'call' && !(e.inc.act === 'police_crit' || e.inc.act === 'fire_struct' || e.inc.act === 'gas')) break; toast('CLEAR', `${im(e.inc).name} on ${e.inc.name} is cleared${e.why === 'crew' ? '' : ''}. Traffic will recover.`, 'var(--green)'); break;
     case 'policeSent': snd('radio'); break;
+    case 'pursuitStart': case 'pursuitMsg': case 'pursuitCrash': case 'pursuitNear': case 'pursuitHonk': case 'pursuitSpiked': case 'pursuitHeli': case 'pursuitEnd': case 'pursuitClear': chEvent(e); break;
     case 'officerSent': snd('radio'); toast('POLICE', `${e.job} on its way to ${e.name}.`, 'var(--cyan)'); break;
     case 'officerOn': pcOn(e); toast('POLICE', e.quiet ? `Nobody to pull over on ${e.name} right now. Officer heading back.` : `${e.job} set up on ${e.name} (${e.mins} min to arrive).`, 'var(--cyan)'); break;
     case 'officerTicket': if (e.n <= 3 || e.n % 5 === 0) toast('TICKET', `${e.kmh} km/h in a ${e.lim} on ${e.name}. Ticket #${e.n}.`, 'var(--amber)'); break;
@@ -226,8 +227,8 @@ function buildHud() {
   for (const [k, l] of POL_MODES) { const b = document.createElement('button'); b.type = 'button'; b.dataset.m = k; b.textContent = l; b.onclick = () => { polMode = k; snd('ui'); syncTools(); }; pr.appendChild(b); }
   syncTools();
 }
-const POL_MODES = [['checkpoint', 'Checkpoint'], ['detour', 'Detour'], ['pullover', 'Pull over'], ['speedtrap', 'Speed trap']];
-const POL_HINT = { checkpoint: 'Tap a road. An officer stops cars one at a time.', detour: 'Tap a road. An officer closes it and sends drivers around.', pullover: 'Tap a road. An officer pulls one car over.', speedtrap: 'Tap a road. An officer ticks speeders. Tap again to recall.' };
+const POL_MODES = [['checkpoint', 'Checkpoint'], ['detour', 'Detour'], ['pullover', 'Pull over'], ['speedtrap', 'Speed trap'], ['pursuit', 'Pursuit']];
+const POL_HINT = { checkpoint: 'Tap a road. An officer stops cars one at a time.', detour: 'Tap a road. An officer closes it and sends drivers around.', pullover: 'Tap a road. An officer pulls one car over.', speedtrap: 'Tap a road. An officer tickets speeders. Tap again to recall.', pursuit: 'Tap a moving car. A cruiser lights it up and it runs.' };
 let polMode = 'checkpoint';
 let panelTimer = 0;
 function closePanels() { for (const [p, b] of [['chips', 'statBtn'], ['feed', 'incBtn']]) { $(p).hidden = true; $(b).setAttribute('aria-expanded', 'false'); } clearTimeout(panelTimer); layout(); }
@@ -398,10 +399,12 @@ function nearestCtrl(x, y, r, any) { let best = -1, bd = r * r; for (let c = 0; 
 // ---------------------------------------------------------------- tap handling
 function onTap(px, py) {
   const w = R.unproject(px, py); if (!w) return; const [x, y] = w;
+  if (chTap(x, y)) return;
   if (tool === 'local') { toggleZone(x, y); return; }
   if (tool === 'sign') { placeSign(x, y); return; }
   if (tool === 'power') { cmd('causePower', x, y).then(r => r.ok === false && toast('OPS', r.msg, 'var(--red)')); return; }
   if (tool === 'crash' || tool === 'water' || tool === 'close') { const n = nearestRoad(x, y, 30 * cam.wpp + 25, e => tool === 'close' || G.cls[e] <= 4); if (!n) { toast('OPS', 'Tap closer to a road.', 'var(--muted)'); return; } cmd(tool === 'crash' ? 'causeCrash' : tool === 'water' ? 'causeWater' : 'closeRoad', n.e).then(r => r && r.ok === false && toast('OPS', r.msg, 'var(--red)')); snd('ui'); return; }
+  if (tool === 'police' && polMode === 'pursuit') { cmd('startPursuit', x, y, 30 * cam.wpp + 14).then(r => r && r.ok === false && toast('OPS', r.msg, 'var(--red)')); snd('ui'); return; }
   if (tool === 'police') { const n = nearestRoad(x, y, 30 * cam.wpp + 25, e => G.cls[e] > 1); if (!n) { toast('OPS', 'Tap closer to a city street.', 'var(--muted)'); return; } cmd('sendOfficer', n.e, x, y, polMode).then(r => r && (r.ok === false ? toast('OPS', r.msg, 'var(--red)') : r.recalled && toast('POLICE', 'Officer recalled.', 'var(--cyan)'))); snd('ui'); return; }
   if (tool === 'closure') { const c = pickCtrl(px, py, 40); if (c < 0) { toast('OPS', 'Tap a signalised intersection.', 'var(--muted)'); return; } cmd('causeClosure', c); return; }
   // inspect
@@ -444,7 +447,7 @@ function buildSprites(dt) {
   liveSpritesA(put);
   for (const i of act) if (i.type === 'hwy' && i.blocks) for (const b of i.blocks) { const p = pts(b.e); const tot = G.len[b.e]; const pos = posAlong(p, Math.max(2, b.s - 28)); const pos2 = posAlong(p, Math.min(tot, b.s + 1)); const ang = Math.atan2(pos2[1] - pos[1], pos2[0] - pos[0]); put(pos[0], pos[1], 0.3, G.lanes[b.e] * 1.8 + 1.5, 6, 1, 6, -(ang + Math.PI / 2)); }
   DIR.heliSprites(put, 'shadow');
-  brkSpritesA(put); pcSprites(put);
+  brkSpritesA(put); pcSprites(put); chSpritesA(put);
   const aN = n;
   // B: additive
   const t = performance.now() / 1000;
@@ -457,7 +460,7 @@ function buildSprites(dt) {
     if (i.type === 'power' && i.state === 'working') put(i.x, i.y, 1, 14, 2, 1, 10, 0);
   }
   for (const s of signs) { if (simT - s.t > 1200) continue; put(s.x, s.y, 1, 9, 2, 0.8 + 0.4 * Math.sin(t * 4), 9, 0); }
-  liveSpritesB(put); brkSpritesB(put, dt);
+  liveSpritesB(put); brkSpritesB(put, dt); chSpritesB(put, dt);
   for (const p of spray) { p.a += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vz -= 18 * dt; put(p.x, p.y, Math.max(0, p.z), 1.2, 8, 1 - p.a / p.life, 2, 0); }
   spray = spray.filter(p => p.a < p.life);
   if (selection) { const p = selPos(selection); if (p) put(p[0], p[1], 0.6, selection.k === 'hood' ? 700 : 40, 11, 1, 40, 0); }
@@ -685,6 +688,7 @@ function frame(now) {
   flash *= Math.exp(-dt * 7);
   let n = frameN; if (ready) { n = addWrecks(posBuf, n); R.setCars(posBuf, n); }
   try { DIR.frame(dt); } catch (err) { console.error(err); }
+  chFrame(dt);
   const spr = buildSprites(dt);
   const night = envNight();
   const outages = incidents.filter(i => i.type === 'power' && i.state !== 'cleared').map(i => [i.x, i.y, i.r]);
@@ -694,8 +698,8 @@ function frame(now) {
   drawOverlay();
   if (ready) requestFrame();
   statT -= dt; if (statT <= 0 && ready) { statT = 0.5; let cars = 0, stopped = 0, siren = false; const x0 = 0, x1 = innerWidth, y0 = 0, y1 = innerHeight; for (let i = 0; i < frameN; i += 3) { const f = posBuf[i * 4 + 3]; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (!p || p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1) continue; cars += 3; if (((f | 0) >> 3) & 1) stopped += 3; } for (let i = Math.max(0, frameN - 90); i < frameN; i++) { const f = posBuf[i * 4 + 3] | 0; if (!((f >> 14) & 1) || ((f >> 13) & 1) || ((f >> 23) & 1)) continue; const ty = f & 7; if (ty !== 2 && ty !== 3 && ty !== 7) continue; const p = R.project(posBuf[i * 4], posBuf[i * 4 + 1], 0); if (p && p[0] > -100 && p[0] < innerWidth + 100 && p[1] > -100 && p[1] < innerHeight + 100) siren = true; } onScreen = { cars, stopped, siren }; }
-  audioFrame(dt, onScreen.stopped, onScreen.cars, false); // no siren sound: lights only
+  audioFrame(dt, onScreen.stopped, onScreen.cars, chSiren()); // siren only for a pursuit the camera is near; otherwise lights only
 }
 requestAnimationFrame(frame);
-window.__gl = { pcTest: m => { const n = nearestRoad(cam.x, cam.y, 3000, e => G.cls[e] > 1); if (!n) return 'noroad'; cmd('sendOfficer', n.e, cam.x, cam.y, m); return n.e; }, get PC() { return PC; }, brkTest: k => brkTest(k), spotXY: () => spotXY(), tvStops: () => tvStops().map(s => ({ kind: s.kind, key: s.key, w: +s.w.toFixed(2), title: s.title, sub: s.sub, kick: s.kick })), inMap: (x, y) => inMap(x, y), get labelCand() { return labelCand; }, areaSet: (c, f) => areaSet(c, f), areaHas: (x, y) => areaHas(x, y), get AREA() { return AREA; }, brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
+window.__gl = { camInfo: () => ({ x: Math.round(cam.x), y: Math.round(cam.y), h: Math.round(cam.h), pitch: +cam.pitch.toFixed(2), shot: !!DIR.shot, cine: document.body.classList.contains('cine'), speed }), chTest: () => cmd('startPursuit', cam.x, cam.y, 600), get CH() { return CH; }, cmd: (...a) => cmd(...a), pcTest: m => { const n = nearestRoad(cam.x, cam.y, 3000, e => G.cls[e] > 1); if (!n) return 'noroad'; cmd('sendOfficer', n.e, cam.x, cam.y, m); return n.e; }, get PC() { return PC; }, brkTest: k => brkTest(k), spotXY: () => spotXY(), tvStops: () => tvStops().map(s => ({ kind: s.kind, key: s.key, w: +s.w.toFixed(2), title: s.title, sub: s.sub, kick: s.kick })), inMap: (x, y) => inMap(x, y), get labelCand() { return labelCand; }, areaSet: (c, f) => areaSet(c, f), areaHas: (x, y) => areaHas(x, y), get AREA() { return AREA; }, brkClass: i => brkClass(i), get BRK() { return BRK; }, get LV() { return LV; }, set tilt(v) { tiltGoal = v; }, get quality() { return { GLS, lite, lock: perf.lock }; }, PULSE, pulseItems: () => pulseItems(), pulseLevel: () => pulseLevel(), pulseOpen, pulseOnFeed, cams: () => cams(), tvStops: () => tvStops(), tvStats: () => tvStats(), tvBoard: () => tvBoard(), get units() { return units; }, get DIR() { return DIR; }, snd: (k) => snd(k), audioInit: () => audioInit(), cam, get summary() { return summary; }, get incidents() { return incidents; }, cmd, select, setSpeed, get simT() { return simT; }, R, onTap, fitView, toast, caption };
 })();

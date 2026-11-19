@@ -122,13 +122,13 @@ const DIR = (function () {
   function stepHelis(dt) {
     const k = Math.min(speed || 0, 5) || 0.2; const live = new Map(incidents.filter(i => i.state !== 'cleared').map(i => [i.id, i]));
     for (let n = helis.length - 1; n >= 0; n--) {
-      const h = helis[n]; const inc = live.get(h.inc); h.age = (h.age || 0) + dt; if (inc) h.seen = true;
+      const h = helis[n]; if (h.follow) { const p = h.follow(); if (p) { h.tx = p.x; h.ty = p.y; h.seen = true; h.age = 0; } else if (h.phase !== 'out') { h.follow = null; h.phase = 'out'; h.tx = h.x; h.ty = bbox[1] - 6000; } } const inc = h.follow ? h : live.get(h.inc); h.age = (h.age || 0) + dt; if (inc) h.seen = true;
       if (!inc && h.phase !== 'out' && (h.seen || h.age > 20)) { const other = incidents.filter(i => i.state !== 'cleared' && (i.type === 'hwy' || (i.type === 'collision' && i.sev >= 1) || i.type === 'closure')).sort((a, b) => b.start - a.start)[0]; if (other && h.kind === 'news') { h.inc = other.id; h.tx = other.x; h.ty = other.y; } else { h.phase = 'out'; h.tx = h.kind === 'news' ? bbox[0] - 6000 : h.x; h.ty = h.kind === 'news' ? h.y : bbox[1] - 6000; } }
       let gx = h.tx, gy = h.ty;
       if (h.phase === 'orbit') { h.ang += dt * k * (34 / h.R); gx = h.tx + Math.cos(h.ang) * h.R; gy = h.ty + Math.sin(h.ang) * h.R; }
       const dx = gx - h.x, dy = gy - h.y, d = Math.hypot(dx, dy);
       if (h.phase === 'in' && d < h.R + 40) { h.phase = 'orbit'; h.ang = Math.atan2(h.y - h.ty, h.x - h.tx); if (h.kind === 'news' && !broadcastSeen.has('chop' + h.inc)) { broadcastSeen.add('chop' + h.inc); const ci = incidents.find(q => q.id === h.inc); if (ci && bigInc(ci)) { say('anchor', ['a:chopper', ci.type === 'hwy' ? 'a:backed' : 'a:avoid'], 2); requestShot({ type: 'chopper', chain: true, heli: h.id, inc: ci.id, x: ci.x, y: ci.y, dur: 9, pri: 2, title: 'EASTWIRE CHOPPER 6 · LIVE', sub: incTitle(ci)[0].replace(' · ', ' · ') }); } } }
-      const vmax = h.phase === 'orbit' ? 34 : 62; const want = Math.min(vmax, d * 0.6);
+      const vmax = h.phase === 'orbit' ? (h.follow ? 60 : 34) : (h.follow ? 95 : 62); const want = Math.min(vmax, d * 0.6);
       const ux = d > 0.1 ? dx / d : 0, uy = d > 0.1 ? dy / d : 0;
       h.v += (want - h.v) * Math.min(1, dt * k * 0.8); h.x += ux * h.v * dt * k; h.y += uy * h.v * dt * k;
       const tgtHd = h.phase === 'orbit' ? Math.atan2(h.ty - h.y, h.tx - h.x) * 0.3 + Math.atan2(uy, ux) * 0.7 : Math.atan2(uy, ux);

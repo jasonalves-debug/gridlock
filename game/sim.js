@@ -148,7 +148,7 @@ function createSim(G, opts) {
   const cNext = new Int32Array(CAP), cDest = new Int16Array(CAP), cLive = new Uint8Array(CAP), cType = new Uint8Array(CAP), cLen = new Float32Array(CAP);
   const cAhead = new Int32Array(CAP), cBehind = new Int32Array(CAP), cTick = new Int32Array(CAP), cWait = new Float32Array(CAP), cWaitStart = new Float32Array(CAP);
   const cEnter = new Float32Array(CAP), cStart = new Float32Array(CAP), cFree = new Float32Array(CAP), cDrv = new Float32Array(CAP), cLc = new Float32Array(CAP);
-  const cHold = new Float32Array(CAP), cOff = new Uint8Array(CAP), cYield = new Float32Array(CAP), cPull = new Float32Array(CAP), cEsc = new Uint8Array(CAP), cWhy = new Uint8Array(CAP), cGrant = new Float32Array(CAP), cLat = new Float32Array(CAP), cOrigH = new Int16Array(CAP), cDestH = new Int16Array(CAP), cStuck = new Float32Array(CAP), cColor = new Uint8Array(CAP), cBrake = new Uint8Array(CAP), cLost = new Uint8Array(CAP);
+  const cHold = new Float32Array(CAP), cSpook = new Float32Array(CAP), cOff = new Uint8Array(CAP), cYield = new Float32Array(CAP), cPull = new Float32Array(CAP), cEsc = new Uint8Array(CAP), cWhy = new Uint8Array(CAP), cGrant = new Float32Array(CAP), cLat = new Float32Array(CAP), cOrigH = new Int16Array(CAP), cDestH = new Int16Array(CAP), cStuck = new Float32Array(CAP), cColor = new Uint8Array(CAP), cBrake = new Uint8Array(CAP), cLost = new Uint8Array(CAP);
   const cRoute = new Int32Array(CAP), cRi = new Int32Array(CAP), cStopS = new Float32Array(CAP).fill(-1), cDwell = new Float32Array(CAP), cPark = new Uint8Array(CAP); // scripted trips (world_trips.js)
   const freeList = []; for (let i = CAP - 1; i >= 0; i--) freeList.push(i);
   let nCars = 0;
@@ -194,7 +194,7 @@ function createSim(G, opts) {
     if (laneBlock[ln] >= 0 && Math.abs(laneBlock[ln] - s) < 15) return -1;
     const c = freeList.pop(); alive[c] = 1; nCars++;
     cEdge[c] = e; cLane[c] = lane; cS[c] = s; cV[c] = 0; cType[c] = type; cLen[c] = len; cDest[c] = dest; cLive[c] = live ? 1 : 0;
-    cDrv[c] = 0.88 + rand() * 0.24; cGrant[c] = 0; cEsc[c] = 0; cYield[c] = 0; cHold[c] = 0; cOff[c] = 0; cPull[c] = 0; cWait[c] = 0; cWaitStart[c] = 0; cLc[c] = rand() * 2; cLat[c] = lane; cStuck[c] = 0; cLost[c] = 0; cBrake[c] = 0;
+    cDrv[c] = 0.88 + rand() * 0.24; cGrant[c] = 0; cEsc[c] = 0; cYield[c] = 0; cHold[c] = 0; cSpook[c] = 0; cOff[c] = 0; cPull[c] = 0; cWait[c] = 0; cWaitStart[c] = 0; cLc[c] = rand() * 2; cLat[c] = lane; cStuck[c] = 0; cLost[c] = 0; cBrake[c] = 0;
     cRoute[c] = 0; cStopS[c] = -1; cPark[c] = 0; cOrigH[c] = origH; cDestH[c] = D[dest].kind === 'hood' || D[dest].kind === 'place' ? D[dest].hood : -1; cColor[c] = (rand() * 255) | 0;
     cEnter[c] = simT; cStart[c] = simT; const fd = distHab[dest * N + eB[e]]; cFree[c] = (fd < 1e8 ? fd : 600) + (eLen[e] - s) / eVmax[e];
     lInsertByS(c, ln); cTick[c] = tick;
@@ -285,7 +285,7 @@ function createSim(G, opts) {
           cTick[c] = tick;
           const p = IDM[cType[c] === T_TRUCK ? 1 : 0];
           const L = eLen[e]; const s = cS[c], v = cV[c];
-          let v0 = Math.min(eVmax[e] * cDrv[c], edgeVcap[e], cEsc[c] ? 3 : 99, cYield[c] > simT ? 2.5 : 99, cHold[c] > simT ? 0.05 : 99, spotFlag[e] ? spotCap(e, s) : 99) * wv;
+          let v0 = Math.min(eVmax[e] * cDrv[c], edgeVcap[e], cEsc[c] ? 3 : 99, cYield[c] > simT ? 2.5 : 99, cHold[c] > simT ? 0.05 : 99, cSpook[c] > simT ? eVmax[e] * 0.5 : 99, spotFlag[e] ? spotCap(e, s) : 99) * wv;
           let gap = 1e9, dv = 0, atLine = false;
           const ah = cAhead[c];
           if (ah >= 0) { gap = cS[ah] - cLen[ah] - s; dv = v - cV[ah]; }
@@ -681,10 +681,246 @@ function createSim(G, opts) {
       }
     }
   }
+  // ---------------- pursuit: the player picks a car, a cruiser lights it up and it runs. It weaves, runs reds, goes the wrong way;
+  // traffic brakes, swerves and pulls over; crashes bring 911 calls and paramedics. Spike strips, roadblocks, PIT, or it gets away.
+  const COLN = ['white', 'silver', 'black', 'grey', 'red', 'blue', 'navy', 'beige', 'white', 'green'], BODY = ['sedan', 'SUV', 'hatchback', 'pickup', 'coupe', 'minivan'];
+  let chase = null, chaseSeq = 0;
+  const pm = (txt, kind, x, y) => ev({ k: 'pursuitMsg', txt, kind: kind || 'radio', x, y });
+  const pickOne = a => a[(rand() * a.length) | 0];
+  function trailAdd(e, s0, prevEnd) { const T = chase.trail, l = T[T.length - 1]; let d0 = 0; if (l) { l.sEnd = prevEnd; d0 = l.d0 + (prevEnd - l.s0); } T.push({ e, s0, sEnd: eLen[e], d0 }); chase.tIdx.set(e, T.length - 1); }
+  function susTrailPos() { const T = chase.trail, l = T[T.length - 1]; return l.d0 + chase.sus.s - l.s0; }
+  function unitTrailPos(u) { const t = chase.trail[u.ti]; return t.d0 + u.s - t.s0; }
+  function susPos() { const S = chase.sus, e = S.e; const [x, y, a] = posOnEdge(e, Math.max(0, Math.min(eLen[e], S.s - S.len * 0.5)), S.lat); S.x = x; S.y = y; S.ang = a + S.spin; }
+  function chaseLead() { let best = null, bp = -1e9; for (const u of chase.units) if (u.state === 'chase') { const p = unitTrailPos(u); if (p > bp) { bp = p; best = u; } } return best; }
+  function startPursuit(x, y, r) {
+    if (chase) return { ok: false, msg: chase.state === 'flee' ? 'A pursuit is already under way' : 'Officers are still wrapping up the last pursuit' };
+    if (pool.police <= 0) return { ok: false, msg: 'All officers are busy' };
+    let best = -1, bd = (r || 40) ** 2;
+    for (let c = 0; c < CAP; c++) { if (!alive[c] || cRoute[c] || cType[c] > T_TRUCK || cHold[c] > simT) continue; const e = cEdge[c]; const [px, py] = posOnEdge(e, cS[c] - cLen[c] * 0.5, laneLat(e, cLat[c])); const d = (px - x) ** 2 + (py - y) ** 2; if (d < bd) { bd = d; best = c; } }
+    if (best < 0) return { ok: false, msg: 'Tap right on a car' };
+    const c = best, e = cEdge[c];
+    const S = { e, s: cS[c], v: Math.max(cV[c], 6), lat: laneLat(e, cLat[c]), tlat: laneLat(e, cLane[c]), col: cColor[c], len: cLen[c], truck: cType[c] === T_TRUCK, next: -1, nextFor: -1, hp: 100, flat: false, flatV: 0,
+      mode: 'road', modeUntil: 0, cool: simT + 5, x: 0, y: 0, ang: 0, brake: 0, spin: 0, lanes: [], ram: -1, dist: 0, maxV: 0, stopLn: -1 };
+    despawn(c, false);
+    chase = { id: ++chaseSeq, t0: simT, state: 'flee', how: null, sus: S, trail: [], tIdx: new Map(), units: [], st: { crashes: 0, hurt: 0, calls: 1, reds: 0, wrong: 0, near: 0, curb: 0, peak: 0 },
+      lostT: 0, nextBackup: simT + 12, nextCall: simT + 10, nextRetarget: simT + 12, heli: false, spikes: [], blocks: [], spikesLeft: 3, blocksLeft: 2, pitT: 0, overUntil: 0, sec: 0, aff: 0, honk: 0 };
+    trailAdd(e, 0, 0);
+    const u = { id: unitSeq++, kind: 'police', d: -1, e, s: Math.max(0, S.s - 38), v: S.v, x: 0, y: 0, ang: 0, state: 'chase', chaseU: true, ti: 0, t0: simT };
+    specials.push(u); chase.units.push(u); pool.police--;
+    chase.desc = `${COLN[S.col % 10]} ${S.truck ? 'box truck' : BODY[S.col % 6]}`;
+    susPos(); const [ux, uy, ua] = posOnEdge(e, u.s, revEdge[e] >= 0 ? 0.6 : 0); u.x = ux; u.y = uy; u.ang = ua;
+    ev({ k: 'pursuitStart', desc: chase.desc, name: edgeName(e), x: S.x, y: S.y, kmh: Math.round(S.v * 3.6), unit: u.id });
+    return { ok: true, desc: chase.desc };
+  }
+  function fleePick(e) {
+    const S = chase.sus, b = eB[e], lead = chaseLead(); const lx = lead ? lead.x : S.x - 1, ly = lead ? lead.y : S.y; let ax = NX[b] - lx, ay = NY[b] - ly; const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
+    let best = -1, bv = -Infinity;
+    for (let k = OUT.start[b]; k < OUT.start[b + 1]; k++) { const o = OUT.list[k]; if (o === revEdge[e]) continue;
+      const dx = NX[eB[o]] - NX[b], dy = NY[eB[o]] - NY[b], dl = Math.hypot(dx, dy) || 1;
+      let v = rand() * 1.5 + 1.5 * (dx * ax + dy * ay) / dl + Math.min(1.6, eVmax[o] / 12);
+      v -= Math.min(1, (lastCnt[o] / 4) * 7 / (eLen[o] * eLanes[o] + 1)) * 2.2; // a jammed street looks like a trap
+      if (OUT.start[eB[o] + 1] - OUT.start[eB[o]] <= 1) v -= 3; // dead end
+      if (edgeClosed[o]) v -= 8; if (nodeClosed[eB[o]] && eLen[o] < 160) v -= 5; // a roadblock he can see from here
+      if (eCls[o] <= 1 && eCls[e] > 1) v -= 0.8;
+      if (v > bv) { bv = v; best = o; } }
+    if (best < 0 && revEdge[e] >= 0) best = revEdge[e];
+    return best;
+  }
+  function uturnSus(why) {
+    const P = chase, S = P.sus, e = S.e, r = revEdge[e]; if (r < 0) return false;
+    const sR = Math.max(0, Math.min(eLen[r] - 1, eLen[e] - S.s)); for (const ln of S.lanes) lbClr(ln, 'sus'); S.lanes.length = 0;
+    trailAdd(r, sR, S.s); S.e = r; S.s = sR; S.v = Math.min(S.v, 4); S.lat = S.tlat = laneLat(r, 0); S.nextFor = -1; S.ram = -1; S.mode = 'road';
+    pm(why || `Suspect spins a U-turn on ${edgeName(e)}!`, 'radio', S.x, S.y);
+    for (const u of P.units) if ((u.state === 'chase' || u.state === 'enroute') && Math.hypot(u.x - S.x, u.y - S.y) < 75) { endChase('boxed'); break; }
+    return true;
+  }
+  function crashPlan(hurt, sev, fire) { const p = [{ kind: 'police', code3: true }, { kind: 'ems', code3: true }]; if (hurt >= 2) p.push({ kind: 'ems', code3: true }); if (sev >= 2 || fire) p.push({ kind: 'fire', code3: true }); return p; }
+  function crash(c, o, b, what) {
+    const P = chase, S = P.sus, swipe = what === 'sideswipe', fast = S.v > 19 && !swipe, sev = fast ? 2 : 1, fire = fast && rand() < 0.3;
+    const hurt = swipe ? (rand() < 0.35 ? 1 : 0) : (c >= 0 ? 1 + (rand() < 0.5 ? 1 : 0) : 0) + (fast && rand() < 0.6 ? 1 : 0);
+    let inc = null;
+    if (c >= 0 && o >= 0) { const s = cS[c]; cHold[c] = simT + 9 * 60; cYield[c] = simT + 9 * 60; cV[c] = 0; inc = makeCollision(o, sev, { s: Math.max(6, Math.min(eLen[o] - 6, s - 1)), plan: crashPlan(hurt, sev, fire), fire, silent: true, pursuit: true }); }
+    else inc = makeCollision(S.e, 1, { s: Math.max(6, Math.min(eLen[S.e] - 6, S.s)), plan: crashPlan(Math.max(1, hurt), 1, fire), fire, silent: true, pursuit: true });
+    const name = b >= 0 ? crossName(b) : edgeName(S.e), x = inc ? inc.x : S.x, y = inc ? inc.y : S.y;
+    P.st.crashes++; P.st.hurt += hurt; const calls = 2 + ((rand() * 5) | 0); P.st.calls += calls;
+    ev({ k: 'pursuitCrash', x, y, name, hurt, sev, fire, what, inc: inc ? inc.id : -1, solo: c < 0 });
+    pm(swipe ? `Suspect sideswipes a car on ${name}${hurt ? '. The other driver is hurt' : ''}. ${calls} callers.` : c < 0 ? `911: car hit a pole at ${name}. ${calls} callers.` : `911: ${what === 'headon' ? 'head-on' : 'T-bone'} crash at ${name}. ${hurt} hurt${hurt > 1 && fast ? ', one trapped' : ''}. ${calls} callers.`, '911', x, y);
+    if (hurt) pm(`Paramedics${sev >= 2 || fire ? ' and fire' : ''} racing to ${name}.`, 'ems', x, y);
+    const dis = (simT - P.t0 < 60 ? 0.5 : 1) * (swipe ? 0.15 : c < 0 ? 0.75 : fast ? 0.6 : 0.35);
+    if (rand() < dis) { S.spin = (rand() - 0.5) * 2.4; endChase('crash'); }
+    else { S.hp -= swipe ? 18 + rand() * 15 : 30 + rand() * 25; S.v *= 0.35; S.spin = (rand() - 0.5) * 0.3; if (S.hp <= 0) endChase('crash'); else pm('Suspect bounces off and keeps going. The car is smoking.', 'radio', S.x, S.y); }
+  }
+  function crossNode() {
+    const P = chase, S = P.sus, e = S.e, b = eB[e], L = eLen[e];
+    if (S.ram === 1 && nodeClosed[b]) { S.s = L - 2; S.spin = 0.9; P.st.crashes++; ev({ k: 'pursuitCrash', x: NX[b], y: NY[b], name: crossName(b), hurt: 0, sev: 1, what: 'roadblock', inc: -1, solo: true }); endChase('roadblock'); return; }
+    let n = S.next; if (n < 0 || n === revEdge[e]) { if (!uturnSus(`Dead end! Suspect U-turns on ${edgeName(e)}.`)) { S.s = L - 1; endChase('boxed'); } return; }
+    const ctl = eCtrl[e]; let red = false; if (ctl >= 0 && !ctrlDark[ctl]) red = (ctrlPolice[ctl] ? policeColor(ctl, eGrp[e]) : sigColor(ctl, eGrp[e], simT)) === 2;
+    const conf = []; for (let k = IN.start[b]; k < IN.start[b + 1]; k++) { const o = IN.list[k]; if (o === e || o === revEdge[n]) continue; if (ctl >= 0 && eGrp[o] === eGrp[e]) continue;
+      for (let l = 0; l < eLanes[o]; l++) { const h = laneHead[laneOf(o, l)]; if (h >= 0 && eLen[o] - cS[h] < 60 && cV[h] > 1.5) conf.push(h); } }
+    if (red || (ctl < 0 && eStop[e] === 1)) P.st.reds++;
+    const at = crossName(b);
+    if (conf.length) {
+      for (const c of conf) { cHold[c] = simT + 1.6 + rand() * 2.2; cSpook[c] = simT + 6; }
+      P.honk += conf.length;
+      let pc = (red ? 0.17 : 0.07) + 0.08 * conf.length; pc = Math.min(0.6, pc * Math.min(1.4, Math.max(0.4, S.v / 16))) * (simT - P.t0 < 45 ? 0.4 : 1);
+      if (rand() < pc) { const c = conf[(rand() * conf.length) | 0]; crash(c, cEdge[c], b, 'tbone'); if (chase.state !== 'flee') return; }
+      else { P.st.near++; ev({ k: 'pursuitNear', x: NX[b], y: NY[b], n: conf.length }); if (P.st.near <= 2 || rand() < 0.4) pm(pickOne([`Near miss at ${at}! Cross traffic slams on the brakes.`, `${conf.length > 1 ? conf.length + ' cars' : 'A car'} nearly T-boned at ${at}.`, `Suspect threads through cross traffic at ${at}.`]), 'radio', NX[b], NY[b]); }
+    } else if (red && (P.st.reds <= 2 || rand() < 0.3)) pm(`Suspect blows the red at ${at}.`, 'radio', NX[b], NY[b]);
+    const t = turnOf(e, n);
+    if (t !== 0 && S.v > 19 && rand() < 0.28) { S.spin = 1.2; pm(`Suspect loses it in the turn at ${at}!`, 'radio', NX[b], NY[b]); crash(-1, -1, b, 'pole'); if (chase.state !== 'flee') return; }
+    for (const ln of S.lanes) lbClr(ln, 'sus'); S.lanes.length = 0;
+    S.s -= L; S.e = n; trailAdd(n, 0, L); S.nextFor = -1; S.ram = -1; S.mode = 'road';
+    const nl2 = eLanes[n], el = t < 0 ? 0 : t > 0 ? nl2 - 1 : Math.min(nl2 - 1, (rand() * nl2) | 0); S.lat = S.tlat = laneLat(n, el);
+  }
+  function oncomingNear(r, sR, range) { // nearest oncoming car in the inside lane of the other direction, and how far away
+    const ln = laneOf(r, 0); for (let c = laneHead[ln]; c >= 0; c = cBehind[c]) { if (cS[c] > sR + 2) continue; const d = sR - cS[c]; return d < range ? [c, d] : null; } return null;
+  }
+  function susStep() {
+    const P = chase, S = P.sus, e = S.e, L = eLen[e], nl = eLanes[e], r = revEdge[e], two = r >= 0, W = LANE_W;
+    if (S.nextFor !== e) { S.next = fleePick(e); S.nextFor = e; }
+    let vT = Math.min(36, eVmax[e] * (eCls[e] <= 1 ? 1.32 : 1.75)) * (0.62 + 0.38 * Math.max(0, S.hp) / 100);
+    if (S.flat) { S.flatV = Math.max(0, S.flatV - 1.5 * DT); vT = Math.min(vT, S.flatV); }
+    const dEnd = L - S.s;
+    if (S.next >= 0 && turnOf(e, S.next) !== 0) vT = Math.min(vT, Math.sqrt(169 + 12 * Math.max(0, dEnd - 4)));
+    if (nodeClosed[eB[e]] && dEnd < 110 && S.ram === -1) { S.ram = rand() < 0.3 || !two ? 1 : 0; if (S.ram === 0) { uturnSus(`Suspect sees the roadblock and spins a U-turn on ${edgeName(e)}!`); return; } pm(`Suspect is not slowing for the roadblock at ${crossName(eB[e])}!`, 'radio', S.x, S.y); }
+    // what is ahead in each lane
+    let curL = 0, bd = 1e9; const gap = [], gv = [], gb = [];
+    for (let l = 0; l < nl; l++) { const d = Math.abs(S.lat - laneLat(e, l)); if (d < bd) { bd = d; curL = l; } const [ga, gbk, ah] = gapsAt(laneOf(e, l), S.s, S.len, -1); gap.push(Math.min(ga, dEnd + 40)); gv.push(ah >= 0 ? cV[ah] : 99); gb.push(gbk); }
+    if (S.mode === 'road' || S.mode === 'merge') {
+      if (S.mode === 'road') { let best = curL; for (let l = Math.max(0, curL - 1); l <= Math.min(nl - 1, curL + 1); l++) if (gap[l] > gap[best] + 6 && gb[l] > 1.5) best = l; if (best !== curL && gap[curL] < Math.max(45, S.v * 2.4)) S.tlat = laneLat(e, best); }
+      const g = gap[curL];
+      if (S.mode === 'road' && g < 24 && gv[curL] < vT * 0.55 && simT > S.cool && dEnd > 45) {
+        if (two && !oncomingNear(r, L - S.s, 85)) { S.mode = 'wrong'; S.modeUntil = simT + 5 + rand() * 4; S.tlat = -0.5 * W; P.st.wrong++; S.cool = simT + 12; P.st.calls++; if (P.st.wrong <= 2 || rand() < 0.4) pm(`Suspect swings into oncoming traffic on ${edgeName(e)}!`, 'radio', S.x, S.y); }
+        else if (rand() < 0.45) { S.mode = 'curb'; S.modeUntil = simT + 3 + rand() * 3; S.tlat = (two ? nl * W : nl * W / 2) + 1.7; P.st.curb++; S.cool = simT + 12; pm(eCls[e] <= 1 ? `Suspect drives down the shoulder of ${edgeName(e)}!` : `Suspect jumps the curb and drives down the sidewalk on ${edgeName(e)}!`, 'radio', S.x, S.y); }
+        else S.cool = simT + 2;
+      }
+    } else if (simT > S.modeUntil || dEnd < 30) { let best = 0; for (let l = 1; l < nl; l++) if (gap[l] > gap[best]) best = l; S.mode = 'merge'; S.tlat = laneLat(e, best); }
+    if (S.mode === 'merge' && Math.abs(S.lat - S.tlat) < 0.6) S.mode = 'road';
+    if (S.mode === 'curb') vT = Math.min(vT, 10);
+    else if (S.mode === 'wrong' && two) { vT = Math.min(vT, eVmax[e] * 1.3);
+      const sR = L - S.s, on = oncomingNear(r, sR, 70);
+      if (on) { const [c, d] = on; cHold[c] = simT + 2.5; cSpook[c] = simT + 6; P.honk++;
+        if (d < 6 + S.v * 0.35 && S.lat < 0) { if (rand() < 0.4) { crash(c, r, -1, 'headon'); return; } S.mode = 'merge'; let best = 0; for (let l = 1; l < nl; l++) if (gap[l] > gap[best]) best = l; S.tlat = laneLat(e, best); P.st.near++; ev({ k: 'pursuitNear', x: S.x, y: S.y, n: 1 }); pm(`Inches from a head-on on ${edgeName(e)}!`, 'radio', S.x, S.y); } } }
+    if (S.mode !== 'curb') for (let l = 0; l < nl; l++) { if (Math.abs(S.lat - laneLat(e, l)) > W * 0.75) continue; const g = gap[l];
+      if (g < 1.2 && S.v - gv[l] > 5 && simT > (S.swipeT || 0)) { S.swipeT = simT + 4; const c = gapsAt(laneOf(e, l), S.s, S.len, -1)[2]; if (c >= 0 && rand() < 0.35) { crash(c, e, -1, 'sideswipe'); return; } } if (g < S.v + 6) vT = Math.min(vT, gv[l] + Math.max(0, g - 3) * 0.7); }
+    // a cruiser that has got in front of him
+    for (const u of P.units) { if (u.state !== 'enroute') continue; let d = -1; if (u.e === e && u.s > S.s) d = u.s - S.s; else if (two && u.e === r && L - u.s > S.s) d = L - u.s - S.s; if (d >= 0 && d < 38 && simT - P.t0 > 60) { pm(`Unit ${u.id} cuts him off on ${edgeName(e)}!`, 'radio', S.x, S.y); endChase('boxed'); return; } }
+    const acc = Math.max(-8, Math.min(S.flat ? 1 : 4.2, (vT - S.v) / DT)); S.v = Math.max(0, S.v + acc * DT); S.brake = acc < -1 || S.v < 0.5 ? 1 : 0;
+    const latRate = (2.2 + S.v * 0.12) * DT; S.lat += Math.max(-latRate, Math.min(latRate, S.tlat - S.lat));
+    const s0 = S.s; S.s += S.v * DT; S.dist += S.v * DT; if (S.v > S.maxV) S.maxV = S.v;
+    for (const p of P.spikes) if (!p.used && p.e === e && s0 < p.s && S.s >= p.s) { p.used = true; if (S.flat) continue; S.flat = true; S.flatV = S.v; susPos(); pm(`Spike strip on ${edgeName(e)}! All four tires shredded. He is riding on the rims.`, 'radio', S.x, S.y); ev({ k: 'pursuitSpiked', x: S.x, y: S.y }); }
+    let guard = 0; while (chase && chase.state === 'flee' && S.s >= eLen[S.e] && guard++ < 4) crossNode();
+    if (!chase || chase.state !== 'flee') return;
+    // the moving car blocks whoever is behind it, and the oncoming lane when it is over there
+    for (const ln of S.lanes) lbClr(ln, 'sus'); S.lanes.length = 0;
+    const e2 = S.e, r2 = revEdge[e2];
+    if (S.mode !== 'curb') { for (let l = 0; l < eLanes[e2]; l++) if (Math.abs(S.lat - laneLat(e2, l)) < W * 0.8) { const ln = laneOf(e2, l); lbSet(ln, Math.max(0, S.s - S.len), 'sus'); S.lanes.push(ln); }
+      if (r2 >= 0 && S.lat < W * 0.3) { const ln = laneOf(r2, 0); lbSet(ln, eLen[r2] - S.s, 'sus'); S.lanes.push(ln); } }
+    // drivers being blown past brake and flinch
+    for (let l = 0; l < eLanes[e2]; l++) for (let c = laneHead[laneOf(e2, l)]; c >= 0; c = cBehind[c]) { const s = cS[c]; if (s > S.s + 22) continue; if (s < S.s - 10) break; if (cSpook[c] < simT) P.honk += 0.2; cSpook[c] = simT + 3; }
+    susPos();
+    if (S.flat && S.v < 0.4) endChase('spikes');
+  }
+  function yieldAhead(e, s, range) { const until = simT + 2.5; for (let l = 0; l < eLanes[e]; l++) for (let c = laneHead[laneOf(e, l)]; c >= 0; c = cBehind[c]) { const cs = cS[c]; if (cs > s + range) continue; if (cs < s + 2) break; cYield[c] = until; } }
+  function unitHome(u) { if (u.d >= 0) freeSpecial(u.d); u.d = -1; pool.police++; u.chaseU = true; goHome(u); }
+  function retarget(u) {
+    const P = chase; if (!P || P.state !== 'flee') { unitHome(u); return; }
+    const S = P.sus, tn = [eB[S.next >= 0 ? S.next : S.e]], d = allocSpecial(tn); if (d < 0) { unitHome(u); return; }
+    const o = nextLive[d * N + eB[u.e]]; if (o < 0) { freeSpecial(d); unitHome(u); return; }
+    u.d = d; u.e = o; u.s = 0; u.state = 'enroute'; u.onArrive = retarget; u.tgt = tn[0];
+  }
+  function stepChaseUnits() {
+    const P = chase, S = P.sus, T = P.trail, sp = susTrailPos(), flee = P.state === 'flee';
+    const ch = P.units.filter(u => u.state === 'chase').map(u => ({ u, p: unitTrailPos(u) })).sort((a, b) => b.p - a.p);
+    let ahead = sp;
+    ch.forEach((o, k) => {
+      const u = o.u, e = T[u.ti].e, gap = ahead - o.p;
+      const cnt = lastCnt[e] / 4, jam = Math.min(1, cnt * 7 / (eLen[e] * eLanes[e] + 1)), mv = lastCnt[e] ? lastSumV[e] / lastCnt[e] : eVmax[e];
+      let vT = Math.min(38, eVmax[e] * 1.7) * (jam > 0.85 ? Math.max(0.3, mv / eVmax[e] * 0.6 + 0.3) : 1 - jam * 0.25);
+      if (!flee) vT = Math.min(vT, 14);
+      const want = flee ? (k ? 12 : 16) + u.v * 0.45 : 7 + k * 3;
+      if (gap < want + 35) vT = Math.min(vT, Math.max(0, (flee ? S.v : 0) + (gap - want) * 0.55));
+      if (!flee && gap < want + 2 && u.v < 0.8) { u.state = 'working'; u.v = 0; u.until = simT + 140 + k * 20; u.ang += k % 2 ? 0.45 : -0.35; ahead = o.p - 9; return; }
+      u.v = Math.max(0, u.v + Math.max(-7 * DT, Math.min(4 * DT, vT - u.v))); u.s += u.v * DT;
+      while (u.ti < T.length - 1 && u.s >= T[u.ti].sEnd) { const over = u.s - T[u.ti].sEnd; u.ti++; u.s = T[u.ti].s0 + over; }
+      if (u.ti === T.length - 1) u.s = Math.min(u.s, S.s - 4);
+      const e2 = T[u.ti].e; const [x, y, a] = posOnEdge(e2, Math.max(0, Math.min(u.s, eLen[e2])), revEdge[e2] >= 0 ? 0.6 : 0); u.x = x; u.y = y; u.ang = a; u.e = e2;
+      const np = unitTrailPos(u); if (flee) yieldAhead(e2, u.s, Math.max(0, Math.min(150, sp - np - 14)));
+      ahead = np - 9;
+    });
+    for (const u of P.units) if (u.state === 'working' && simT >= u.until) unitHome(u);
+    if (!flee) { for (const u of P.units) if (u.state === 'enroute' || u.state === 'arrived') unitHome(u); return; }
+    // backups that drive onto the suspect's path tuck in behind him
+    for (const u of P.units) { if (u.state !== 'enroute') continue; const i = P.tIdx.get(u.e); if (i === undefined || i < T.length - 40) continue; const t = T[i]; if (u.s < t.s0 || u.s > t.sEnd) continue; const p = t.d0 + u.s - t.s0; if (p > sp - 14) continue;
+      freeSpecial(u.d); u.d = -1; u.state = 'chase'; u.chaseU = true; u.ti = i; pm(`Unit ${u.id} is in behind the suspect.`, 'radio'); }
+  }
+  function endChase(how) {
+    const P = chase, S = P.sus; if (!P || P.state !== 'flee') return;
+    if (S.flat && (how === 'boxed' || how === 'pit')) how = 'spikes';
+    const gone = how === 'escaped' || how === 'calledoff';
+    P.state = gone ? 'gone' : 'over'; P.how = how; S.v = 0; S.brake = 1;
+    for (const ln of S.lanes) lbClr(ln, 'sus'); S.lanes.length = 0;
+    if (!gone) { let l0 = -1, bd = 1.2 * LANE_W; for (let l = 0; l < eLanes[S.e]; l++) { const d = Math.abs(S.lat - laneLat(S.e, l)); if (d < bd) { bd = d; l0 = l; } } if (l0 >= 0) { S.stopLn = laneOf(S.e, l0); lbSet(S.stopLn, Math.max(0, S.s - S.len), 'susStop'); } P.overUntil = simT + 4 * 60; }
+    else { P.overUntil = simT + 20; let l0 = 0, bd = 1e9; for (let l = 0; l < eLanes[S.e]; l++) { const d = Math.abs(S.lat - laneLat(S.e, l)); if (d < bd) { bd = d; l0 = l; } } let dest = -1; for (let k = 0; k < 40 && dest < 0; k++) { const c = (rand() * CAP) | 0; if (alive[c] && !cRoute[c]) dest = cDest[c]; } if (dest >= 0) { const c = spawnCar(S.e, Math.max(1, S.s), l0, S.truck ? T_TRUCK : T_CAR, dest, -1, 1); if (c >= 0) cColor[c] = S.col; }
+      for (const u of P.units) if (u.state !== 'done') unitHome(u); }
+    const foot = !gone && how !== 'pit' && rand() < (how === 'crash' ? 0.5 : how === 'spikes' ? 0.6 : 0.3);
+    ev({ k: 'pursuitEnd', how, foot, x: S.x, y: S.y, edge: S.e, s: S.s, ang: S.ang, name: edgeName(S.e), mins: (simT - P.t0) / 60, desc: P.desc, st: Object.assign({}, P.st), km: S.dist / 1000, top: Math.round(S.maxV * 3.6), units: P.units.length });
+  }
+  function chaseCleanup() { const P = chase; if (P.sus.stopLn >= 0) lbClr(P.sus.stopLn, 'susStop'); for (const ln of P.sus.lanes) lbClr(ln, 'sus'); for (const b of P.blocks) if (!b.done) { b.done = true; nodeClosed[b.node]--; } for (const u of P.units) if (u.state !== 'done') unitHome(u); chase = null; ev({ k: 'pursuitClear' }); }
+  function stepPursuit() {
+    if (!chase) return; const P = chase, S = P.sus;
+    if (P.state === 'flee') susStep();
+    if (!chase) return;
+    stepChaseUnits();
+    for (const b of P.blocks) if (!b.done && simT >= b.until) { b.done = true; nodeClosed[b.node]--; }
+    P.sec += DT; if (P.sec < 1) { if (P.state !== 'flee' && simT > P.overUntil) chaseCleanup(); return; } P.sec -= 1;
+    if (P.state !== 'flee') { if (simT > P.overUntil) chaseCleanup(); return; }
+    const sp = susTrailPos(), lead = chaseLead(), gapLead = lead ? sp - unitTrailPos(lead) : 1e9; P.gap = gapLead;
+    // PIT when a cruiser has been glued to his bumper on a straight
+    if (gapLead < 28 && S.v > 7 && S.v < 27 && eCls[S.e] >= 2 && eCls[S.e] <= 4 && eLen[S.e] - S.s > 40 && simT - P.t0 > 100 && S.mode === 'road') { if (++P.pitT > 6 && rand() < 0.07) { S.spin = 2.6; pm(`PIT manoeuvre on ${edgeName(S.e)}! The ${P.desc} spins out.`, 'radio', S.x, S.y); endChase('pit'); return; } } else P.pitT = 0;
+    let dmin = 1e9; for (const u of P.units) if (u.state === 'chase' || u.state === 'enroute') dmin = Math.min(dmin, Math.hypot(u.x - S.x, u.y - S.y));
+    if (dmin > 350 && !P.heli) { if (++P.lostT === 8) pm('Units have lost sight of the suspect.', 'radio'); } else P.lostT = Math.max(0, P.lostT - 2);
+    if (P.lostT > 20) { pm(`The ${P.desc} is gone. Last seen on ${edgeName(S.e)}.`, 'radio'); endChase('escaped'); return; }
+    if (!P.heli && simT - P.t0 > 150) { P.heli = true; P.lostT = 0; ev({ k: 'pursuitHeli' }); pm('Air support is overhead. He cannot hide now.', 'radio'); }
+    if (simT - P.t0 > 6 * 60 && (eLen[S.e] - S.s > 30) && rand() < 0.08) { pm(`The ${P.desc} pulls over on ${edgeName(S.e)}. He gives up.`, 'radio', S.x, S.y); endChase('gaveup'); return; }
+    // backups: dispatched toward where he is heading
+    if (simT >= P.nextBackup) { P.nextBackup = simT + 16 + rand() * 10; const act = P.units.filter(u => u.state === 'chase' || u.state === 'enroute').length;
+      if (act < 5 && pool.police > 0) { const tn = eB[S.next >= 0 ? S.next : S.e], dep = nearestDepot('police', NX[tn], NY[tn]); const u = startSpecial('police', dep, NX[tn], NY[tn], retarget, { targets: [tn], chaseB: true, chaseU: true });
+        if (u) { pool.police--; u.tgt = tn; P.units.push(u); pm(`Unit ${u.id} joining from ${dep.n || 'the division'}.`, 'radio'); } } }
+    if (simT >= P.nextRetarget) { P.nextRetarget = simT + 10; for (const u of P.units) if (u.state === 'enroute' && u.d >= 0 && u.tgt >= 0 && Math.hypot(NX[u.tgt] - S.x, NY[u.tgt] - S.y) > 450) { const tn = eB[S.next >= 0 ? S.next : S.e], d = allocSpecial([tn]); if (d >= 0) { freeSpecial(u.d); u.d = d; u.tgt = tn; } } }
+    // how many drivers around him are braking, swerving or pulled over right now
+    let aff = 0; for (let c = 0; c < CAP; c++) if (alive[c] && (cSpook[c] > simT || cYield[c] > simT || (cHold[c] > simT && cHold[c] < simT + 30))) aff++; P.aff = aff; if (aff > P.st.peak) P.st.peak = aff;
+    if (P.honk >= 1) { ev({ k: 'pursuitHonk', x: S.x, y: S.y, n: Math.min(4, Math.round(P.honk)) }); P.honk = 0; }
+    if (simT >= P.nextCall) { P.nextCall = simT + 9 + rand() * 12; if (aff > 4) { P.st.calls += 1 + (aff > 25 ? 1 : 0); const kmh = Math.round(S.v * 3.6 / 5) * 5, nm = edgeName(S.e);
+      { const L = [`911: caller says a ${P.desc} just passed her doing ${kmh} on ${nm}.`, `911: "He almost took my mirror off" on ${nm}.`, `911: driver on ${nm} reports cruisers flying by, lights and sirens.`, `911: "There's a chase going right past my house!" ${nm}.`, `911: pedestrian on ${nm} says the car missed him by a foot.`]; let i = (rand() * L.length) | 0; if (i === P.lastLine) i = (i + 1) % L.length; P.lastLine = i; if (eCls[S.e] <= 1 && i === 4) i = 2; pm(L[i], '911', S.x, S.y); } } }
+  }
+  function pursuitSpikes(e, x, y) {
+    const P = chase; if (!P || P.state !== 'flee') return { ok: false, msg: 'No pursuit under way' }; if (P.spikesLeft <= 0) return { ok: false, msg: 'Out of spike strips' };
+    const s = edgeS(e, x, y), [sx, sy, a] = posOnEdge(e, s, 0); P.spikesLeft--;
+    const w = (revEdge[e] >= 0 ? eLanes[e] + eLanes[revEdge[e]] : eLanes[e]) * LANE_W;
+    P.spikes.push({ e, s, used: false, x: sx, y: sy, a, w }); if (revEdge[e] >= 0) P.spikes.push({ e: revEdge[e], s: eLen[e] - s, used: false, x: sx, y: sy, a, w, twin: true });
+    pm(`Spike strip down on ${edgeName(e)}. ${P.spikesLeft} left.`, 'radio', sx, sy); return { ok: true };
+  }
+  function pursuitBlock(x, y) {
+    const P = chase; if (!P || P.state !== 'flee') return { ok: false, msg: 'No pursuit under way' }; if (P.blocksLeft <= 0) return { ok: false, msg: 'No roadblocks left' };
+    const n = nearestNode(x, y, i => notHwy(i) && OUT.start[i + 1] - OUT.start[i] >= 3); if (n < 0 || Math.hypot(NX[n] - x, NY[n] - y) > 160) return { ok: false, msg: 'Tap an intersection' };
+    if (Math.hypot(NX[n] - P.sus.x, NY[n] - P.sus.y) < 60) return { ok: false, msg: 'Too close to the suspect. Pick an intersection further ahead.' };
+    P.blocksLeft--; nodeClosed[n]++; P.blocks.push({ node: n, until: simT + 240, done: false });
+    let k = 0; const props = []; for (let q = IN.start[n]; q < IN.start[n + 1] && k < 3; q++) { const o = IN.list[q]; if (eCls[o] <= 1) continue; const [px, py, pa] = posOnEdge(o, Math.max(2, eLen[o] - 9), 0); props.push({ kind: 'police', x: px, y: py, ang: pa + Math.PI / 2 }); k++; }
+    api.addProps(props, 240);
+    pm(`Roadblock set at ${crossName(n)}. ${P.blocksLeft} left.`, 'radio', NX[n], NY[n]); return { ok: true, x: NX[n], y: NY[n] };
+  }
+  function pursuitPub() {
+    if (!chase) return null; const P = chase, S = P.sus, lead = chaseLead();
+    return { id: P.id, state: P.state, how: P.how, t: simT - P.t0, kmh: Math.round(S.v * 3.6), name: edgeName(S.e), dir: dirName(S.ang), x: S.x, y: S.y, hp: Math.round(S.hp), flat: S.flat, mode: S.mode, desc: P.desc,
+      units: P.units.filter(u => u.state === 'chase' || u.state === 'enroute').length, st: P.st, heli: P.heli, aff: P.aff, gap: Math.round(P.gap || 0), lost: P.lostT,
+      spikes: P.spikes.filter(p => !p.twin).map(p => ({ x: p.x, y: p.y, a: p.a, w: p.w, used: p.used })), spikesLeft: P.spikesLeft, blocksLeft: P.blocksLeft,
+      blocks: P.blocks.filter(b => !b.done).map(b => ({ x: NX[b.node], y: NY[b.node] })), lead: lead ? { x: lead.x, y: lead.y } : null };
+  }
   function stepUnits() {
     for (let i = specials.length - 1; i >= 0; i--) {
       const u = specials[i];
-      if (u.state === 'working' && u.kind === 'police' && !u.officer && simT >= u.until) { ctrlPolice[u.ctrl] = 0; pool.police++; u.state = 'done'; ev({ k: 'policeOff', ctrl: u.ctrl, name: ctrlName(u.ctrl) }); }
+      if (u.state === 'working' && u.kind === 'police' && !u.officer && !u.chaseU && simT >= u.until) { ctrlPolice[u.ctrl] = 0; pool.police++; u.state = 'done'; ev({ k: 'policeOff', ctrl: u.ctrl, name: ctrlName(u.ctrl) }); }
       if (u.state === 'working' && u.inc && !u.responder) { const inc = incidents.find(x => x.id === u.inc); if (!inc || inc.state === 'cleared') { u.state = 'done'; pool[u.kind]++; } else if (simT >= inc.workUntil) { clearIncident(inc, 'crew'); u.state = 'done'; pool[u.kind]++; } }
       if (u.prop && simT >= u.until) u.state = 'done';
       if (u.state === 'arrived' && u.kind === 'ems') { u.state = 'done'; }
@@ -771,7 +1007,7 @@ function createSim(G, opts) {
   let treeAcc = 0, secAcc = 0;
   function step() {
     tick++; simT += DT;
-    stepCars(); laneChanges(); stepSpecials(); stepOfficers();
+    stepCars(); laneChanges(); stepSpecials(); stepOfficers(); stepPursuit();
     // stats from this step's crossing observations
     for (let i = 0; i < exitObs.length; i += 2) { const e = exitObs[i], t = exitObs[i + 1]; ttEma[e] = ttEma[e] * 0.75 + t * 0.25; if (eCtrl[e] >= 0) { ctrlCnt[eCtrl[e]]++; ctrlTot[eCtrl[e]]++; } }
     exitObs.length = 0;
@@ -811,6 +1047,7 @@ function createSim(G, opts) {
       buf[k++] = x; buf[k++] = y; buf[k++] = a; buf[k++] = cType[c] | (cBrake[c] << 3) | (cColor[c] << 4) | (cLen[c] > 6 ? 1 << 12 : 0);
     }
     for (const u of specials) { if (u.state === 'done') continue; buf[k++] = u.x; buf[k++] = u.y; buf[k++] = u.ang; const t = { police: T_POLICE, opp: T_POLICE, ems: T_EMS, tow: T_TOW, crew: T_TOW, hydro: T_HYDRO, water: T_WATER, fire: T_FIRE }[u.kind]; buf[k++] = t | (u.state === 'working' || u.state === 'onscene' ? 1 << 13 : 0) | (1 << 14) | ((u.id & 255) << 15) | (u.quiet ? 1 << 23 : 0) | (u.kind === 'opp' ? 1 << 4 : 0); }
+    if (chase && chase.state !== 'gone') { const S = chase.sus; buf[k++] = S.x; buf[k++] = S.y; buf[k++] = S.ang; buf[k++] = (S.truck ? T_TRUCK : T_CAR) | (S.brake << 3) | ((S.col & 255) << 4) | (S.truck ? 1 << 12 : 0) | (1 << 14) | (1 << 23); }
     k = writeTrains(buf, k); k = writeRealBuses(buf, k);
     return k / 4;
   }
@@ -831,7 +1068,7 @@ function createSim(G, opts) {
     init() { updateCosts(false); for (let d = 0; d < ND; d++) { if (D[d].kind === 'special') continue; buildTree(d, costHab, nextHab, distHab); } updateCosts(true); for (let d = 0; d < ND; d++) if (D[d].kind !== 'special') buildTree(d, costLive, nextLive, distLive); if (mode === 'shift' && !opts.noIncidents) setupShift(); },
     addProps(list, secs) { for (const p of list) specials.push({ id: unitSeq++, kind: p.kind, d: -1, e: 0, s: 0, v: 0, x: p.x, y: p.y, ang: p.ang, state: 'onscene', t0: simT, onT: simT, prop: true, until: simT + secs }); return list.length; }, // breaking-news scenes: parked emergency vehicles that leave by themselves
     setTargetCars(n) { targetCars = n; }, setTime(t) { simT = t; }, setMode(m, prof) { mode = m; if (prof) whatifProfile = prof; },
-    dispatch, sendPolice, recallPolice, sendOfficer,
+    dispatch, sendPolice, recallPolice, sendOfficer, startPursuit, pursuitSpikes, pursuitBlock, pursuit: pursuitPub, pursuitCallOff() { if (!chase || chase.state !== 'flee') return { ok: false, msg: 'No pursuit under way' }; pm('Supervisor calls it off. Too dangerous for the public.', 'radio'); endChase('calledoff'); return { ok: true }; },
     setSplit(ctl, split) { ctrlSplit[ctl] = Math.max(0.2, Math.min(0.8, split)); ev({ k: 'retimed', ctrl: ctl, name: ctrlName(ctl), split: ctrlSplit[ctl] }); return { ok: true }; },
     getSignal(ctl) { const appr = ctrlAppr[ctl]; const names = [new Set(), new Set()]; for (const e of appr) if (eName[e] >= 0) names[eGrp[e]].add(G.names[eName[e]]); let q = [0, 0]; for (const e of appr) for (let l = 0; l < eLanes[e]; l++) for (let k = laneHead[laneOf(e, l)]; k >= 0 && eLen[e] - cS[k] < 150; k = cBehind[k]) if (cV[k] < 2) q[eGrp[e]]++; return { ctrl: ctl, name: ctrlName(ctl), split: ctrlSplit[ctl], cycle: ctrlCycle[ctl], g0: [...names[0]].join(' / ') || 'Main road', g1: [...names[1]].join(' / ') || 'Cross street', q, police: ctrlPolice[ctl], dark: ctrlDark[ctl], flow: Math.round(ctrlFlow[ctl]), count: G.ctrls[ctl].count >= 0 ? G.counts[G.ctrls[ctl].count] : null }; },
     closeRoad(e) { const exh = incidents.find(i => i.type === 'hwy' && !i.crash && i.state !== 'cleared' && i.blocks.some(b => b.e === e)); if (exh) { clearIncident(exh, 'reopened'); return { ok: true, reopened: true }; }
@@ -888,7 +1125,7 @@ if (typeof WorkerGlobalScope !== 'undefined' && root instanceof WorkerGlobalScop
       const n = S.writePositions(posBuf);
       const msg = { type: 'frame', n, buf: posBuf, t: S.t, rain: S.weather.rain, snow: S.weather.snow || 0, fog: S.weather.fog || 0, storm: S.weather.live ? (S.weather.storm || 0) : (S.weather.rain || 0) };
       const tr = [posBuf.buffer];
-      if (d.wantSlow) { msg.units = S.units(); msg.spd = S.edgeSpeeds(new Uint8Array(S.E)); msg.cut = S.cutEdges(new Uint8Array(S.E)); msg.sig = S.signalStates(new Uint8Array(S.C)); msg.summary = S.summary(); msg.incidents = S.incidents.filter(i => i.state !== 'cleared' || S.t - i.end < 20).map(S.pubInc); msg.world = S.pubWorldLive(); const wd = S.worldDirty; if (wd === 2) msg.worldStatic = S.pubWorld(); else if (wd === 1) msg.zones = S.pubZones(); tr.push(msg.spd.buffer, msg.sig.buffer, msg.cut.buffer); }
+      if (d.wantSlow) { msg.units = S.units(); msg.spd = S.edgeSpeeds(new Uint8Array(S.E)); msg.cut = S.cutEdges(new Uint8Array(S.E)); msg.sig = S.signalStates(new Uint8Array(S.C)); msg.summary = S.summary(); msg.incidents = S.incidents.filter(i => i.state !== 'cleared' || S.t - i.end < 20).map(S.pubInc); msg.world = S.pubWorldLive(); msg.pursuit = S.pursuit(); const wd = S.worldDirty; if (wd === 2) msg.worldStatic = S.pubWorld(); else if (wd === 1) msg.zones = S.pubZones(); tr.push(msg.spd.buffer, msg.sig.buffer, msg.cut.buffer); }
       postMessage(msg, tr);
     } else if (d.type === 'speed') { speed = d.v; paused = d.v === 0; last = performance.now(); }
     else if (d.type === 'cmd') {

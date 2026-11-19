@@ -376,6 +376,8 @@ function buildPrograms() {
         float stripe = step(0.5, fract((vQ.x + vQ.y) * 3.0)); float a = step(abs(vQ.y), 0.22) * step(abs(vQ.x), 1.0); c = vec4(mix(vec3(1.0, 0.45, 0.05), vec3(0.95), stripe) * (0.6 + uNight * 0.5) * 1.3, a); }
       else if (vK == 7) { // pulse ring
         float ph = fract(vT * 0.7 + vSeed); float ring = exp(-pow((d - ph) * 14.0, 2.0)) * (1.0 - ph); c = vec4(vec3(1.0, 0.35, 0.2) * ring * vA * 1.5, 0.0); }
+      else if (vK == 30) { // sparks
+        float g = exp(-d * d * 5.0); c = vec4(vec3(1.0, 0.62, 0.18) * g * vA * 2.2, 0.0); }
       else if (vK == 8) { // spray particles
         float g = exp(-d * d * 6.0); c = vec4(vec3(0.55, 0.8, 1.0) * g * vA, 0.0); }
       else if (vK == 9) { // dark outage dome (alpha)
