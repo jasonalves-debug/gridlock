@@ -5,22 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/probe'
     steps:
-      - run: |
-          cat > f.py <<'PY'
-          import urllib.request, re, sys
-          for u in sys.argv[1:]:
-              try:
-                  r = urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (gridlock news bulletin)"}), timeout=20); b = r.read().decode("utf-8", "replace"); print("===", u, r.status, len(b))
-                  t = re.findall(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", b, re.S)[:7]; d = re.findall(r"<pubDate>(.*?)</pubDate>", b)[:2]
-                  for x in t: print("   T", x.strip()[:120])
-                  print("   D", d)
-              except Exception as e: print("===", u, "ERR", e)
-          PY
-          python3 f.py "https://toronto.citynews.ca/feed/" "https://toronto.citynews.ca/category/local-news/feed/" "https://www.cbc.ca/webfeed/rss/rss-canada-toronto" "https://globalnews.ca/toronto/feed/" "https://www.cp24.com/arc/outboundfeeds/rss/?outputType=xml" "https://www.cp24.com/rss/cp24-news" "https://www.thestar.com/search/?f=rss&t=article&c=news/gta*&l=50&s=start_time&sd=desc" "https://www.toronto.com/search/?f=rss&t=article&c=news/scarborough*&l=50&s=start_time&sd=desc" "https://feeds.feedburner.com/blogto" "https://www.ctvnews.ca/rss/ctvnews-ca-toronto-public-rss-1.822319" "https://toronto.citynews.ca/toronto-news/feed/" "https://www.cbc.ca/cmlink/rss-canada-toronto" "https://toronto.ctvnews.ca/rss/ctv-news-toronto-1.822319" "https://www.cp24.com/arc/outboundfeeds/rss/category/local/?outputType=xml" "https://globalnews.ca/feed/"
       - env:
           K: ${{ secrets.ONTARIO511_KEY }}
         run: |
-          curl -s "https://511on.ca/api/v2/get/messagesigns?format=json&lang=en&key=$K" -o ms.json; python3 -c "
+          for ep in messagesigns MessageSigns signs; do curl -s -D - "https://511on.ca/api/v2/get/$ep?format=json&lang=en&key=$K" -o ms.json | head -3; head -c 300 ms.json; echo; done; python3 -c "
           import json; d=json.load(open('ms.json')); print(type(d), len(d)); print(json.dumps(d[:2])[:800])
           W,S,E,N=-79.65,43.6,-79.0,43.9
           for v in d:
@@ -33,15 +21,3 @@ jobs:
               if 'Don Valley' in str(v.get('RoadwayName')) or 'DVP' in str(v.get('RoadwayName')): print('EV', v.get('RoadwayName'), v.get('EventType'), str(v.get('Description'))[:120])
           print(collections.Counter(v.get('RoadwayName') for v in d).most_common(12))
           " || true
-      - run: |
-          pip install -q kokoro-onnx soundfile
-          curl -sSL -o k.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx
-          curl -sSL -o v.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
-          nproc
-          python -c "
-          import time
-          from kokoro_onnx import Kokoro
-          k=Kokoro('k.onnx','v.bin')
-          for i in range(3):
-              t=time.time(); s,sr=k.create('Around three this morning, Toronto police were called to a break and enter at Lawrence Avenue East and Brimley Road.', voice='am_michael', speed=1.0, lang='en-us'); print(len(s)/sr, 'audio', time.time()-t, 'sec')
-          "
