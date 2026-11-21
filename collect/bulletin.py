@@ -92,7 +92,7 @@ def place(c):
         if re.search(r"\b401\b", p):
             parts.append("the 401 ramp" if re.search(r"ramp", p, re.I) else "the 401")
             continue
-        parts.append(street(p))
+        parts.append(street(re.sub(r"^\d+[A-Za-z]?\s+", "", p)))
     if not parts:
         return "in Scarborough"
     if lane and len(parts) == 1:
@@ -221,6 +221,8 @@ def headlines(prev):
                 for k, it in enumerate(got):
                     m = re.search(r"\s+-\s+([^-]{2,40})$", it["title"])
                     it["src"], it["gn"] = (m.group(1).strip() if m else "Google News"), k
+            for it in got:
+                it["src"] = re.sub(r"^the ", "", it["src"], flags=re.I)
             items += got
             status[name] = len(got)
         except Exception as e:  # noqa: BLE001
@@ -259,7 +261,7 @@ def headlines(prev):
         newest = max(x["ts"] for x in outs.values())
         t = spoken(lead["title"])
         sc = n * 2.0 + (2.5 if re.search(r"scarborough", t, re.I) else 0) + (0.8 if LOCAL.search(t) else 0) \
-            + (max(0, 12 - c["gn"]) / 6 if c["gn"] < 99 else 0) - (now - newest) / (8 * 3600) - (0.8 if lead["src"] == "blogTO" else 0)
+            + (max(0, 12 - c["gn"]) / 10 if c["gn"] < 99 else 0) - (now - newest) / (8 * 3600) - (0.8 if lead["src"] == "blogTO" else 0)
         out.append({"id": "n" + hashlib.sha1(t.encode()).hexdigest()[:10], "src": lead["src"], "title": t, "orig": lead["title"], "ts": newest,
                     "outlets": sorted(outs, key=lambda o: o not in direct)[:4], "n": n, "local": bool(re.search(r"scarborough", t, re.I)),
                     "sport": bool(SPORT.search(t)), "score": round(sc, 2)})
@@ -292,7 +294,7 @@ def news_line(it, k):
         else:
             s = f"Our top story, from {outs[0]}: {t}."
     else:
-        s = ["Also today, from {s}: ", "And {s} reports: ", "Plus, from {s}: "][(k - 1) % 3].format(s=outlet_list(outs[:2])) + t + "."
+        s = ["Also today, from {s}: ", "And from {s}: ", "Plus, from {s}: "][(k - 1) % 3].format(s=outlet_list(outs[:2])) + t + "."
     return s[0].upper() + s[1:]
 
 
