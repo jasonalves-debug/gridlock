@@ -164,7 +164,7 @@ SPORT = re.compile(r"raptors|leafs|blue jays|\bjays\b|argos|\btfc\b|nhl|nba|mlb|
 def fetch_feed(name, url):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (GRIDLOCK news bulletin; github.com/jasonalves-debug/gridlock)"})
-    body = urllib.request.urlopen(req, timeout=35).read()
+    body = urllib.request.urlopen(req, timeout=15).read()
     try:
         raw = [(it.findtext("title"), it.findtext("pubDate"), it.findtext("link")) for it in ET.fromstring(body).iter("item")]
     except ET.ParseError:  # some feeds aren't strict XML: fall back to pulling the fields out by hand
@@ -447,6 +447,11 @@ def build():
             wx = dict(weather(live), at=int(time.time()))
         except Exception as e:  # noqa: BLE001
             st["weather"] = f"down: {e}"
+            cur = (live or {}).get("weather") or {}
+            if not wx and cur.get("temperature_2m") is not None:  # current conditions from the live feed, no forecast
+                cond = WMO.get(cur.get("weather_code"), "")
+                wx = {"text": f"Right now in Scarborough, it's {words(cur['temperature_2m'])} degrees" + (f", with {cond}." if cond else "."),
+                      "now": {"t": cur["temperature_2m"], "feels": None, "code": cur.get("weather_code"), "cond": cond}, "hi": [], "lo": [], "alerts": [], "at": int(time.time()) - 600}
 
     # everything that should have a voice, most urgent first: (key, text, voice)
     want = []
