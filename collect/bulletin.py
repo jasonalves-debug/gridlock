@@ -86,6 +86,9 @@ def place(c):
     for p in raw:
         if re.match(r"Ln\b", p):
             continue  # City laneway names ("Ln 2 N Queen E Kingston") read terribly
+        if re.fullmatch(r"(Cpr|Cnr|Cp Rail|Cn Rail|C P R)", p, re.I):
+            parts.append("the rail tracks")
+            continue
         if re.search(r"\b401\b", p):
             parts.append("the 401 ramp" if re.search(r"ramp", p, re.I) else "the 401")
             continue
@@ -95,7 +98,7 @@ def place(c):
     if lane and len(parts) == 1:
         return f"near {parts[0]}"
     if len(parts) >= 2:
-        if any(re.search(r"metrolinx|ttc|hydro|plaza|mall|park$", p, re.I) for p in parts[1:]):
+        if any(re.search(r"metrolinx|ttc|hydro|plaza|mall|park$|rail tracks", p, re.I) for p in parts[1:]):
             return f"on {parts[0]} near {parts[1]}"
         return f"at {parts[0]} and {parts[1]}"
     return f"on {parts[0]}"
@@ -222,7 +225,8 @@ def headlines(prev):
 def news_line(it, k):
     t = it["title"].rstrip(".!? ")
     lead = ["From {s}: ", "{s} reports: ", "And from {s}: ", "Also, from {s}: "][k % 4].format(s=it["src"])
-    return lead + t + "."
+    s = lead + t + "."
+    return s[0].upper() + s[1:]
 
 
 # ───────────────────────── traffic ─────────────────────────
@@ -374,7 +378,7 @@ def static_phrases():
         P[f"t_today_{h}"] = (f"Overnight, around {hw}," if h < 5 else f"Around {hw} this morning," if h < 12 else
                              "Around noon today," if h == 12 else f"Around {hw} this afternoon," if h < 17 else f"Around {hw} this evening," if h < 21 else f"Around {hw} tonight,")
         P[f"t_yday_{h}"] = (f"Early yesterday, around {hw}{at}," if h < 5 else f"Yesterday morning, around {hw}," if h < 12 else
-                            "Yesterday around noon," if h == 12 else f"Yesterday afternoon, around {hw}," if h < 17 else f"Last night, around {hw},")
+                            "Yesterday around noon," if h == 12 else f"Yesterday afternoon, around {hw}," if h < 17 else f"Yesterday evening, around {hw}," if h < 21 else f"Last night, around {hw},")
     return P
 
 
