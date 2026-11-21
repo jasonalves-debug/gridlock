@@ -87,7 +87,8 @@ def fsa_of(c, pts):
 
 
 def scripts(live, bul, pts):
-    """{fsa: [(voice, text), ...]} for every Scarborough area."""
+    """{fsa: {segs: [{who, bed, items: [{t, k, ref}]}]}} for every Scarborough area. Each item is voiced on its own, so the
+    finished mix knows exactly when every call, headline and forecast starts (the map uses that to move the camera)."""
     now = datetime.now(TORONTO)
     nts = now.timestamp()
     calls = [c for c in (live.get("calls") or []) if 0 <= nts - c.get("ts", 0) < 86400]
@@ -97,38 +98,48 @@ def scripts(live, bul, pts):
     greet = "Good morning" if 5 <= hr < 12 else "Good afternoon" if hr < 17 and hr >= 12 else "Good evening" if 17 <= hr < 22 else "Good evening, if you're still up"
     part = "this morning" if 4 <= hr < 12 else "this afternoon" if 12 <= hr < 17 else "tonight"
     date = f"{now.strftime('%A')}, {now.strftime('%B')} {ordinal(now.day)}"
-    news = (bul.get("news") or {}).get("items") or []
-    news_txt = (f"In Toronto news {part}. " + " ".join(B.news_line(it, k) for k, it in enumerate(news[:3]))) if news else ""
+    news = ((bul.get("news") or {}).get("items") or [])[:3]
     tr, wx = (bul.get("traffic") or {}).get("text"), (bul.get("weather") or {}).get("text")
-    desk = ""
-    if tr or wx:
-        desk = f"Thanks, {B.ANCHOR_NAME.split()[0]}. " + (tr + " " if tr else "") + (f"And the weather. {wx} " if wx else "") + f"I'm {B.DESK_NAME}."
+    A1, D1 = B.ANCHOR_NAME.split()[0], B.DESK_NAME.split()[0]
     serious = sorted([c for c in calls if c.get("sev") in ("critical", "high") or c.get("act") in ("fire_struct", "gas", "crash3")], key=lambda c: -score(c, nts))
+    I = lambda t, k, ref=None: {"t": t, "k": k, "ref": ref}
+    call_item = lambda c: I(f"{when(c['ts'], now)}, {lower_first(B.call_line(c))}", "call", c["id"])
     out = {}
     for f, name in B.FSA_NAMES.items():
         mine = [c for c in calls if c["_f"] == f]
         feat = dedupe(sorted([c for c in mine if c.get("act") not in ("medical", "fire_alarm") and B.call_line(c)], key=lambda c: -score(c, nts)))[:3]
         feat.sort(key=lambda c: c["ts"])
         minor = len(mine) - len(feat)
-        s1 = f"{greet}. This is the Gridlock Report for {name}, {date}. I'm {B.ANCHOR_NAME}. "
+        it = [I(f"{greet}. This is the Gridlock Report for {name}, {date}. I'm {B.ANCHOR_NAME}.", "intro")]
         if feat:
-            s1 += "Here's what happened in your area over the last day. " + " ".join(f"{when(c['ts'], now)}, {lower_first(B.call_line(c))}" for c in feat) + " "
+            it.append(I("Here's what happened in your area over the last day.", "local"))
+            it += [call_item(c) for c in feat]
         else:
-            s1 += f"It's been a quiet day in {name}. Nothing serious reported in the last day. "
+            it.append(I(f"It's been a quiet day in {name}. Nothing serious reported in the last day.", "quiet"))
         if minor > 0:
             fm = [c for c in mine if c not in feat]
             med = sum(1 for c in fm if c.get("act") in ("medical", "fire_alarm"))
             kind = "mostly medical calls and alarms" if med * 2 >= len(fm) else "mostly minor police calls"
-            s1 += ("There was also one smaller call. " if minor == 1 else f"There were also {B.words(minor) if minor <= 20 else minor} smaller calls, {kind}. ")
-        wide = dedupe([c for c in serious if c["_f"] != f])[: 1 if len(feat) >= 2 else 2]
+            it.append(I("There was also one smaller call." if minor == 1 else f"There were also {B.words(minor) if minor <= 20 else minor} smaller calls, {kind}.", "minor"))
+        wide = sorted(dedupe([c for c in serious if c["_f"] != f])[: 1 if len(feat) >= 2 else 2], key=lambda c: c["ts"])
         if wide:
-            s1 += "Elsewhere in Scarborough. " + " ".join(f"{when(c['ts'], now)}, {lower_first(B.call_line(c))}" for c in sorted(wide, key=lambda c: c["ts"]))
-        segs = [("anchor", s1.strip(), "wire")]
-        if news_txt:
-            segs.append(("anchor", news_txt + (f" Now, traffic and weather together. Here's {B.DESK_NAME.split()[0]}." if desk else ""), "news"))
-        if desk:
-            segs.append(("desk", desk, "desk"))
-        segs.append(("anchor", (f"Thanks, {B.DESK_NAME.split()[0]}. " if desk else "") + f"And that's the Gridlock Report for {name}. Stay safe out there.", None))
+            it.append(I("Elsewhere in Scarborough.", "wider"))
+            it += [call_item(c) for c in wide]
+        segs = [{"who": "anchor", "bed": "wire", "items": it}]
+        if news:
+            n = [I(f"In Toronto news {part}.", "newsintro")] + [I(B.news_line(x, k), "news", x["id"]) for k, x in enumerate(news)]
+            if tr or wx:
+                n.append(I(f"Now, traffic and weather together. Here's {D1}.", "toss"))
+            segs.append({"who": "anchor", "bed": "news", "items": n})
+        if tr or wx:
+            d = [I(f"Thanks, {A1}.", "deskhi")]
+            if tr:
+                d.append(I(tr, "traffic"))
+            if wx:
+                d += [I("And the weather.", "wxintro"), I(wx, "weather")]
+            d.append(I(f"I'm {B.DESK_NAME}.", "deskout"))
+            segs.append({"who": "desk", "bed": "desk", "items": d})
+        segs.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report for {name}. Stay safe out there.", "outro")]})
         out[f] = {"name": name, "segs": segs, "local": len(feat), "minor": max(0, minor)}
     return out
 
@@ -318,25 +329,46 @@ def am_voice(m, x):
 
 
 def render(ep):
-    """The finished episode as MP3 bytes, plus its length."""
+    """The finished episode as MP3 bytes, its length, and a cue sheet: when each jingle and each spoken item starts."""
     import lameenc
-    voiced = [(who, voice_pcm(text, who)[0], b) for who, text, b in ep["segs"]]
-    total = 12 + sum(len(v) / SR + 3 for _, v, _ in voiced)
-    m = Mix(total)
+    m = Mix(30)
     np = m.np
-    t = jingle(m, "open", 0.05) - 0.9
-    for k, (who, pcm, bk) in enumerate(voiced):
+    cues = []
+    gap = int(0.32 * SR)
+    t = jingle(m, "open", 0.05)
+    cues.append({"t": 0.05, "d": round(t, 2), "k": "open"})
+    t -= 0.9
+    segs = ep["segs"]
+    for k, sg in enumerate(segs):
         if k == 1:
-            t += jingle(m, "bump", t + 0.35) + 0.05
-        elif who == "desk":
-            t += jingle(m, "traffic", t + 0.3) + 0.1
-        v = am_voice(m, pcm)
-        d = len(v) / SR
-        if bk:
-            bed(m, bk, t - 0.3, d + 0.6, 0.22 if bk != "news" else 0.18)
+            d = jingle(m, "bump", t + 0.35)
+            cues.append({"t": round(t + 0.35, 2), "d": d, "k": "bump"})
+            t += d + 0.05
+        elif sg["who"] == "desk":
+            d = jingle(m, "traffic", t + 0.3)
+            cues.append({"t": round(t + 0.3, 2), "d": d, "k": "sting"})
+            t += d + 0.1
+        parts, offs, pos = [], [], 0
+        for i, item in enumerate(sg["items"]):
+            pcm = voice_pcm(item["t"], sg["who"])[0]
+            offs.append((pos, len(pcm)))
+            parts.append(pcm)
+            parts.append(np.zeros(gap if i < len(sg["items"]) - 1 else 0, dtype=np.float32))
+            pos += len(pcm) + gap
+        v = am_voice(m, np.concatenate(parts))
+        dur = len(v) / SR
+        if sg["bed"]:
+            bed(m, sg["bed"], t - 0.3, dur + 0.6, 0.22 if sg["bed"] != "news" else 0.18)
         m.add(v, t)
-        t += d + (0.45 if k < len(voiced) - 1 else 0.15)
-    t += jingle(m, "close", t - 0.2) - 0.2
+        for item, (o, n) in zip(sg["items"], offs):
+            c = {"t": round(t + o / SR, 2), "d": round(n / SR, 2), "k": item["k"], "txt": item["t"], "who": sg["who"]}
+            if item.get("ref"):
+                c["ref"] = item["ref"]
+            cues.append(c)
+        t += dur + (0.45 if k < len(segs) - 1 else 0.15)
+    d = jingle(m, "close", t - 0.2)
+    cues.append({"t": round(t - 0.2, 2), "d": d, "k": "close"})
+    t += d - 0.2
     buf = m.buf[: int((t + 0.6) * SR)]
     n = len(buf)
     hiss = m.filt("bandpass", [2000, 6000], np.random.uniform(-1, 1, n).astype(np.float32)) * 0.006
@@ -352,7 +384,7 @@ def render(ep):
     enc.set_in_sample_rate(SR)
     enc.set_channels(1)
     enc.set_quality(2)
-    return enc.encode((buf * 32767).astype(np.int16).tobytes()) + enc.flush(), round(n / SR, 1)
+    return enc.encode((buf * 32767).astype(np.int16).tobytes()) + enc.flush(), round(n / SR, 1), cues
 
 
 # ───────────────────────── podcast feeds ─────────────────────────
@@ -391,14 +423,14 @@ def build():
     made, out = 0, {}
     for f in order:
         ep = eps[f]
-        key = hashlib.sha1(json.dumps(ep["segs"]).encode()).hexdigest()[:12]
+        key = hashlib.sha1((B.ANCHOR + B.DESK + json.dumps(ep["segs"])).encode()).hexdigest()[:12]
         old = pf.get(f) or {}
         fresh_enough = old.get("key") == key or (old.get("file") and time.time() - old.get("at", 0) < 600)
         if (fresh_enough and old.get("file") and os.path.exists(path(old["file"]))) or time.time() - t0 > BUDGET:
             out[f] = old if old.get("file") else {"name": ep["name"], "file": None}
             continue
         try:
-            data, dur = render(ep)
+            data, dur, cues = render(ep)
         except Exception as e:  # noqa: BLE001
             print("episode failed:", f, e)
             out[f] = old
@@ -409,8 +441,9 @@ def build():
         made += 1
         hist = [h for h in (old.get("hist") or []) if os.path.exists(path(h["file"]))][-1:]
         entry = {"name": ep["name"], "file": rel, "dur": dur, "bytes": len(data), "at": int(time.time()), "key": key, "local": ep["local"],
-                 "minor": ep["minor"], "script": [{"v": w, "t": t} for w, t, _ in ep["segs"]],
-                 "summary": " ".join(t for _, t, _ in ep["segs"])[:600]}
+                 "minor": ep["minor"], "cues": cues,
+                 "script": [{"v": sg["who"], "t": " ".join(i["t"] for i in sg["items"])} for sg in ep["segs"]],
+                 "summary": " ".join(i["t"] for sg in ep["segs"] for i in sg["items"])[:600]}
         entry["hist"] = hist + [{k: entry[k] for k in ("file", "dur", "bytes", "at", "summary")}]
         out[f] = entry
         open(os.path.join(POD_DIR, f + ".xml"), "w").write(podcast(f, ep["name"], list(reversed(entry["hist"]))))

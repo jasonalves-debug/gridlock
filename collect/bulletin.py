@@ -22,8 +22,8 @@ from gridlock.common import TORONTO, get, load, path, save  # noqa: E402
 
 OUT = "bulletin.json"
 VOICE_DIR = path("voice")
-ANCHOR, DESK = "am_michael", "af_heart"          # Kokoro voices: news anchor, traffic & weather
-ANCHOR_NAME, DESK_NAME = "Gordon Hale", "Peggy Lane"
+ANCHOR, DESK = "af_heart", "af_bella"            # Kokoro voices: news anchor, traffic & weather (its two most natural voices)
+ANCHOR_NAME, DESK_NAME = "Peggy Lane", "Ruth Avery"
 BUDGET = float(os.environ.get("VOICE_BUDGET", "75"))  # seconds of synthesis per round
 MODEL_DIR = os.path.expanduser(os.environ.get("KOKORO_DIR", "~/.cache/kokoro"))
 MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
@@ -573,7 +573,7 @@ def build():
             os.remove(os.path.join(VOICE_DIR, f))
     missing = sum(1 for c in clips.values() if not c.get("f"))
     st.setdefault("voice", f"live ({len(clips) - missing} clips, {missing} waiting)")
-    out = {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "anchor": ANCHOR_NAME, "desk": DESK_NAME,
+    out = {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "anchor": ANCHOR_NAME, "desk": DESK_NAME, "deskVoice": DESK,
            "news": news, "traffic": tr, "weather": wx, "lines": lines, "clips": clips, "status": st}
     save(OUT, out)
     print(f"bulletin: {len(news.get('items', []))} headlines, traffic {tr and tr.get('src')}, {made} new clips in {spent:.0f}s, {missing} waiting, {time.time() - t0:.0f}s total")

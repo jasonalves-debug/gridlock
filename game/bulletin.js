@@ -63,6 +63,7 @@ function bulGo() { bulArm(); begin('live'); }
 function bulArm() {
   audioInit(); if (muted) setMuted(false); BUL.want = true;
   try { if (!document.getElementById('bulFont')) { const l = document.createElement('link'); l.id = 'bulFont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Special+Elite&display=swap'; document.head.appendChild(l); } } catch (e) {}
+  BUL.epP = fetch(FEED_BASE + 'episodes.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   BUL.dataP = fetch(FEED_BASE + 'bulletin.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   BUL.geoP = new Promise(res => { let done = false; const fin = v => { if (!done) { done = true; res(v); } };
     if (!navigator.geolocation) return fin(store.get('bulMe', null));
@@ -139,7 +140,7 @@ function bulSpeakFallback(text, desk) { // the phone's own voice, for anything t
     if (pref) u.voice = pref; u.rate = 1.0; u.pitch = desk ? 1.05 : 0.92; u.onend = u.onerror = () => res(); speechSynthesis.speak(u); setTimeout(res, 2000 + text.length * 90); } catch (e) { res(); } });
 }
 async function bulSay(key, text, nocap) {
-  const c = (BUL.data && BUL.data.clips && BUL.data.clips[key]) || {}; text = text || c.t || ''; if (!text && !c.f) return; const desk = c.v === 'af_heart' || key.startsWith('s:desk') || key === 'traffic' || key === 'weather';
+  const c = (BUL.data && BUL.data.clips && BUL.data.clips[key]) || {}; text = text || c.t || ''; if (!text && !c.f) return; const desk = (BUL.data && c.v && c.v === BUL.data.deskVoice) || key.startsWith('s:desk') || key === 'traffic' || key === 'weather';
   $('bulCap').textContent = nocap ? '' : text; bulDuck(true);
   const buf = await bulLoad(key);
   if (BUL.stop) return;
@@ -229,6 +230,14 @@ async function bulStart() {
   const [data, geo] = await Promise.all([Promise.race([BUL.dataP, bulWait(9000).then(() => null)]), Promise.race([BUL.geoP, bulWait(10000).then(() => null)])]);
   BUL.data = data || { clips: {}, lines: {} };
   if (geo) { const P = G.proj, x = (geo.lng - P.lon0) * P.kx, y = -(geo.lat - P.lat0) * P.ky; BUL.me = { x, y, lat: geo.lat, lng: geo.lng, inside: inMap(x, y) }; } else BUL.me = null;
+  // the produced episode for the listener's postal area: one finished mix, with a cue sheet the map follows
+  const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]);
+  const fsa = eps && geo ? bulFsa(eps, geo.lat, geo.lng) : null, ep = fsa && eps.fsa && eps.fsa[fsa];
+  if (ep && ep.file && ep.cues) {
+    $('bulMsg').textContent = 'TUNING IN TO ' + (ep.name || fsa).toUpperCase() + '…';
+    const buf = await Promise.race([fetch(FEED_BASE + ep.file).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(b => new Promise((res, rej) => AC.decodeAudioData(b, res, rej))).catch(() => null), bulWait(15000).then(() => null)]);
+    if (buf && !BUL.stop) { clearInterval(tick); clearInterval(sweep); lead.hidden = true; if (N) N.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.2); bulPlayEpisode(ep, fsa, buf); return; }
+  }
   BUL.seq = bulBuild(BUL.me);
   $('bulMsg').textContent = 'WARMING UP THE TUBES…';
   const keys = BUL.seq.filter(s => s.k === 'say').map(s => s.key); await Promise.race([Promise.all(keys.slice(0, 14).map(bulLoad)), bulWait(6000)]); keys.forEach(bulLoad);
@@ -236,17 +245,56 @@ async function bulStart() {
   if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); }
   BUL.t0 = performance.now(); bulRun();
 }
+function bulFsa(eps, lat, lng) { let best = null, bd = 1e9; for (const [f, P] of Object.entries(eps.points || {})) for (const [a, b] of P) { const d = (a - lat) ** 2 + ((b - lng) * 0.72) ** 2; if (d < bd) { bd = d; best = f; } } return bd < 0.0009 ? best : null; }
+function bulPlayEpisode(ep, fsa, buf) {
+  const N = bulAudio(), src = AC.createBufferSource(); src.buffer = buf; src.connect(N.out); BUL.srcs.add(src);
+  src.onended = () => { BUL.srcs.delete(src); bulEnd(); };
+  const t0 = AC.currentTime + 0.15; src.start(t0);
+  BUL.ep = { ep, fsa, t0, i: 0, cues: ep.cues.slice().sort((a, b) => a.t - b.t), cardOff: 0, lowOff: 0 };
+  if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); BUL.ring = BUL.me; }
+}
+function bulCue(c) { // what the map does when the voice gets to each part
+  const me = BUL.me && BUL.me.inside ? BUL.me : null, D = BUL.data || {}, cap = $('bulCap'), low = $('bulLow');
+  const home = h => { camGoal = { x: me ? me.x : 0, y: me ? me.y : 0, h: me ? h : Math.max(h, 6000) }; };
+  if (c.k !== 'call' && c.k !== 'news') { low.classList.remove('show'); BUL.marks = []; }
+  if (c.txt && c.k !== 'news') cap.textContent = c.txt; else if (c.k === 'news') cap.textContent = '';
+  switch (c.k) {
+    case 'open': $('bulDate').textContent = new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase(); $('bulCard').classList.add('show'); BUL.ep.cardOff = c.t + c.d - 1.2; break;
+    case 'intro': $('bulCard').classList.remove('show'); home(1500); break;
+    case 'local': case 'quiet': home(1400); break;
+    case 'call': { const o = h24calls().find(x => x.c.id === c.ref); if (!o) break; const cc = o.c, dist = me ? Math.round(Math.hypot(o.x - me.x, o.y - me.y) / 10) * 10 : 0;
+      BUL.ring = null; BUL.marks = [{ x: o.x, y: o.y, t: performance.now() }]; camGoal = { x: o.x, y: o.y, h: 420 };
+      $('bulLK').textContent = `${cc.src === 'tps' ? 'TORONTO POLICE' : 'TORONTO FIRE'} · ${bulHM(cc.ts)}`; $('bulLT').textContent = (cc.label || '').toUpperCase();
+      const sub = bulPlace(cc) + (dist ? ` · ${dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m'} from you` : ''); $('bulLS').style.display = ''; bulType($('bulLS'), sub); low.classList.add('show'); break; }
+    case 'minor': home(1800); break;
+    case 'wider': home(5000); break;
+    case 'bump': case 'newsintro': home(2600); break;
+    case 'news': { const it = ((D.news && D.news.items) || []).find(x => x.id === c.ref); const outs = it ? (it.outlets || [it.src]).filter(o => o !== 'Google News') : [];
+      $('bulLK').textContent = (outs.length ? outs.slice(0, 3).join(' · ') : 'TORONTO NEWS').toUpperCase(); $('bulLT').textContent = it ? it.title : c.txt; $('bulLS').style.display = 'none'; low.classList.add('show'); break; }
+    case 'traffic': { const hw = bulHwyView(me); camGoal = { x: hw.x, y: hw.y, h: 1800 }; bulBoard('traffic'); break; }
+    case 'wxintro': $('bulBoard').classList.remove('show'); home(2600); break;
+    case 'weather': bulBoard('weather'); break;
+    case 'deskout': $('bulBoard').classList.remove('show'); break;
+    case 'outro': $('bulBoard').classList.remove('show'); home(900); BUL.ring = me; break;
+    case 'close': cap.textContent = ''; break;
+  }
+}
+function bulEpTick() {
+  const E = BUL.ep; if (!E || !BUL.on) return; const t = AC.currentTime - E.t0;
+  while (E.i < E.cues.length && E.cues[E.i].t <= t) bulCue(E.cues[E.i++]);
+  if (E.cardOff && t > E.cardOff) { $('bulCard').classList.remove('show'); E.cardOff = 0; }
+}
 function bulEnd() {
   if (!BUL.on) return; BUL.on = false; BUL.stop = true; for (const s of BUL.srcs) { try { s.stop(); } catch (e) {} } BUL.srcs.clear(); try { speechSynthesis.cancel(); } catch (e) {}
   bulBed(null); if (BUL.nodes) BUL.nodes.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.4);
-  document.body.classList.remove('bul'); $('bul').hidden = true; $('bulLow').classList.remove('show'); $('bulBoard').classList.remove('show'); $('bulCard').classList.remove('show'); BUL.marks = []; BUL.ring = null;
+  document.body.classList.remove('bul'); $('bul').hidden = true; $('bulLow').classList.remove('show'); $('bulBoard').classList.remove('show'); $('bulCard').classList.remove('show'); BUL.marks = []; BUL.ring = null; BUL.ep = null;
   if (BUL.me && BUL.me.inside) camGoal = { x: BUL.me.x, y: BUL.me.y, h: 900 };
   toast('REPORT', BUL.me && BUL.me.inside ? 'That was your report. You\'re on the live map, centred on you.' : 'That was your report. You\'re on the live map.', 'var(--cyan)');
 }
 $('bulSkip').onclick = () => { snd('ui'); bulEnd(); };
-setInterval(() => { if (!BUL.on) return; bulBedTick(); const c = $('bulClk'); if (c) c.textContent = new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace('a.m.', 'AM').replace('p.m.', 'PM'); if (performance.now() > BUL.holdT) { BUL.holdT = performance.now() + 1000; try { DIR.hold(15000); } catch (e) {} } }, 100);
+setInterval(() => { if (!BUL.on) return; bulBedTick(); bulEpTick(); const c = $('bulClk'); if (c) c.textContent = new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace('a.m.', 'AM').replace('p.m.', 'PM'); if (performance.now() > BUL.holdT) { BUL.holdT = performance.now() + 1000; try { DIR.hold(15000); } catch (e) {} } }, 100);
 function bulSprites(put) {
   if (!BUL.on) return; const now = performance.now();
-  if (BUL.ring) { put(BUL.ring.x, BUL.ring.y, 0.5, BUL_R, 11, 0.45, 6, 0); put(BUL.ring.x, BUL.ring.y, 0.6, 40 + 10 * Math.sin(now / 300), 7, 1, 30, 0); }
+  if (BUL.ring) { if (!BUL.ep) put(BUL.ring.x, BUL.ring.y, 0.5, BUL_R, 11, 0.45, 6, 0); put(BUL.ring.x, BUL.ring.y, 0.6, 40 + 10 * Math.sin(now / 300), 7, 1, 30, 0); }
   for (const m of BUL.marks) put(m.x, m.y, 0.5, 30 + 8 * Math.sin((now - m.t) / 200), 7, 1, 40, 0);
 }
