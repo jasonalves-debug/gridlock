@@ -33,7 +33,7 @@ jobs:
           path: ~/.cache/kokoro
           key: kokoro-v1.0-int8
       - name: Voice tools (Kokoro TTS for the news bulletin)
-        run: pip install --quiet kokoro-onnx lameenc || echo "::warning::voice tools did not install; the bulletin will use the phone's voice"
+        run: pip install --quiet kokoro-onnx lameenc scipy || echo "::warning::voice tools did not install; the bulletin will use the phone's voice"
       - name: Collect every 2.5 minutes
         env:
           ONTARIO511_KEY: ${{ secrets.ONTARIO511_KEY }}

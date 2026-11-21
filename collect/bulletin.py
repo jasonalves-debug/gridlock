@@ -183,49 +183,116 @@ def fetch_feed(name, url):
     return out
 
 
+STOP = set("toronto ontario police after with from into over that this their about says said will have been more than what when where your they them amid plus just near could would should first last year years week".split())
+SKIP = re.compile(r"weather|fog advisory|highway closures|road closures|traffic|horoscope|lotto|lottery|crossword|^watch\b|^video\b|^photos?\b|podcast|newsletter|^opinion", re.I)
+
+
+def spoken(t):
+    """A headline made readable aloud: section labels, abbreviations, money and symbols."""
+    t = re.sub(r"\s+-\s+[^-]{2,40}$", "", t)  # Google News adds " - Outlet"
+    m = re.match(r"^([A-Za-z'&. ]{3,28}):\s+(.+)$", t)
+    if m and len(m.group(1).split()) <= 3 and not re.search(r"\b(says|told|warns)\b", m.group(1), re.I):
+        t = m.group(2)
+    t = re.sub(r"^(UPDATE|BREAKING|EXCLUSIVE|LIVE|WATCH)[: ]+", "", t, flags=re.I)
+    t = re.sub(r"\$(\d+(?:\.\d+)?)\s?([MBK])\b", lambda m: f"{m.group(1)} {dict(M='million', B='billion', K='thousand')[m.group(2)]} dollars", t)
+    t = re.sub(r"\$(\d+(?:\.\d+)?)\s?(million|billion|thousand)", r"\1 \2 dollars", t)
+    t = re.sub(r"\$([\d,]+)", r"\1 dollars", t)
+    for a, b2 in ((r"\bPM\b", "Prime Minister"), (r"\bvs\.?\b", "versus"), (r"\bJan\.", "January"), (r"\bFeb\.", "February"), (r"\bAug\.", "August"),
+                  (r"\bSept?\.", "September"), (r"\bOct\.", "October"), (r"\bNov\.", "November"), (r"\bDec\.", "December"), (r"%", " percent"),
+                  (r"&", "and"), (r"\bU\.S\.", "U.S."), (r"\bEMS\b", "paramedics"), (r"\bOPP\b", "provincial police"), (r"\bSIU\b", "the S I U")):
+        t = re.sub(a, b2, t)
+    t = t.replace('"', "").replace("'s ", "'s ").strip(" .")
+    return t[:1].upper() + t[1:]
+
+
+def toks(t):
+    return {w for w in re.findall(r"[a-z]{4,}", t.lower()) if w not in STOP}
+
+
 def headlines(prev):
-    if prev and time.time() - prev.get("fetched", 0) < 600:   # every 10 minutes is plenty
+    """Top Toronto stories: the stories the most outlets are carrying, nudged by Google News' own ranking."""
+    if prev and time.time() - prev.get("fetched", 0) < 600 and prev.get("v") == 2:   # every 10 minutes is plenty
         return prev
     items, status = [], {}
-    for name, url in FEEDS:
+    for name, url in FEEDS + [("Google News", "https://news.google.com/rss/headlines/section/geo/Toronto?hl=en-CA&gl=CA&ceid=CA:en")]:
         try:
             got = fetch_feed(name, url)
+            if name == "Google News":
+                for k, it in enumerate(got):
+                    m = re.search(r"\s+-\s+([^-]{2,40})$", it["title"])
+                    it["src"], it["gn"] = (m.group(1).strip() if m else "Google News"), k
             items += got
             status[name] = len(got)
         except Exception as e:  # noqa: BLE001
             status[name] = f"down: {str(e)[:60]}"
     now = time.time()
-    keep, seen = [], []
+    clusters = []
     for it in sorted(items, key=lambda x: -x["ts"]):
-        if now - it["ts"] > 18 * 3600 or it["ts"] > now + 3600:
+        if now - it["ts"] > 20 * 3600 or it["ts"] > now + 3600:
             continue
-        t = it["title"]
-        if FAR.search(t) and not re.search(r"toronto|scarborough|ontario", t, re.I):
+        t = spoken(it["title"])
+        if SKIP.search(t) or (FAR.search(t) and not re.search(r"toronto|scarborough|ontario|gta", t, re.I)):
             continue
-        toks = set(re.findall(r"[a-z]{4,}", t.lower()))
-        if any(len(toks & s) / max(1, len(toks | s)) > 0.4 for s in seen):
+        tk = toks(t)
+        if len(tk) < 2:
             continue
-        seen.append(toks)
-        sc = (3 if re.search(r"scarborough", t, re.I) else 0) + (1.2 if LOCAL.search(t) else 0) - (now - it["ts"]) / (6 * 3600)
-        if it["src"] == "blogTO":
-            sc -= 0.6
-        it = dict(it, id="n" + hashlib.sha1(t.encode()).hexdigest()[:10], local=bool(re.search(r"scarborough", t, re.I)),
-                  sport=bool(SPORT.search(t)), score=round(sc, 2))
-        keep.append(it)
-    keep.sort(key=lambda x: -x["score"])
-    per, final = {}, []
-    for it in keep:
-        if per.get(it["src"], 0) >= 3:
-            continue
-        per[it["src"]] = per.get(it["src"], 0) + 1
+        best = None
+        for c in clusters:
+            j = len(tk & c["tk"]) / max(1, len(tk | c["tk"]))
+            if j > 0.28 or len(tk & c["tk"]) >= 4:
+                best = c
+                break
+        if best:
+            best["outlets"].setdefault(it["src"], it)
+            best["tk"] |= tk
+            if "gn" in it:
+                best["gn"] = min(best.get("gn", 99), it["gn"])
+        else:
+            clusters.append({"tk": set(tk), "outlets": {it["src"]: it}, "gn": it.get("gn", 99)})
+    out = []
+    for c in clusters:
+        outs = c["outlets"]
+        # credit a real outlet we fetched directly when we have one, else the one Google News named
+        direct = [o for o in outs if o in dict(FEEDS)]
+        lead = min(outs.values(), key=lambda x: (x["src"] not in direct, -x["ts"]))
+        n = len(outs)
+        newest = max(x["ts"] for x in outs.values())
+        t = spoken(lead["title"])
+        sc = n * 2.0 + (2.5 if re.search(r"scarborough", t, re.I) else 0) + (0.8 if LOCAL.search(t) else 0) \
+            + (max(0, 12 - c["gn"]) / 6 if c["gn"] < 99 else 0) - (now - newest) / (8 * 3600) - (0.8 if lead["src"] == "blogTO" else 0)
+        out.append({"id": "n" + hashlib.sha1(t.encode()).hexdigest()[:10], "src": lead["src"], "title": t, "orig": lead["title"], "ts": newest,
+                    "outlets": sorted(outs, key=lambda o: o not in direct)[:4], "n": n, "local": bool(re.search(r"scarborough", t, re.I)),
+                    "sport": bool(SPORT.search(t)), "score": round(sc, 2)})
+    out.sort(key=lambda x: -x["score"])
+    final, sport = [], 0
+    for it in out:
+        if it["sport"]:
+            if sport:
+                continue
+            sport += 1
         final.append(it)
-    return {"fetched": int(now), "status": status, "items": final[:10]}
+        if len(final) >= 6:
+            break
+    return {"fetched": int(now), "v": 2, "status": status, "items": final}
+
+
+def outlet_list(o):
+    o = [x for x in o if x != "Google News"]
+    return o[0] if len(o) == 1 else ", ".join(o[:-1]) + " and " + o[-1]
 
 
 def news_line(it, k):
     t = it["title"].rstrip(".!? ")
-    lead = ["From {s}: ", "{s} reports: ", "And from {s}: ", "Also, from {s}: "][k % 4].format(s=it["src"])
-    s = lead + t + "."
+    outs = it.get("outlets") or [it["src"]]
+    if k == 0:
+        if len(outs) >= 3:
+            s = f"Our top story: {t}. It's leading at {outlet_list(outs[:3])}."
+        elif len(outs) == 2:
+            s = f"Our top story: {t}. {outlet_list(outs)} are both reporting it."
+        else:
+            s = f"Our top story, from {outs[0]}: {t}."
+    else:
+        s = ["Also today, from {s}: ", "And {s} reports: ", "Plus, from {s}: "][(k - 1) % 3].format(s=outlet_list(outs[:2])) + t + "."
     return s[0].upper() + s[1:]
 
 

@@ -175,9 +175,7 @@ function bulBuild(me) {
   const wide = calls.filter(o => far(o) && (o.c.sev === 'critical' || o.c.sev === 'high' || o.c.act === 'fire_struct' || o.c.act === 'gas' || o.c.act === 'crash3')).sort((a, b) => bulScore(b) - bulScore(a)); const wideP = bulDedupe(wide.filter(o => !feat.includes(o))).slice(0, feat.length >= 3 ? 1 : feat.length ? 2 : 3).sort((a, b) => a.c.ts - b.c.ts);
   if (wideP.length) { seq.push({ k: 'ring', on: false }, { k: 'bed', b: 'wire' }, { k: 'say', key: feat.length ? 's:wider' : (me && me.inside ? 's:wider2' : 's:top') }); wideP.forEach(o => callItem(o)); }
   seq.push({ k: 'bed', b: null }, { k: 'ring', on: false });
-  const items = ((D.news && D.news.items) || []).filter(it => !/weather|fog advisory|highway closures|road closures for|traffic/i.test(it.title)).sort((a, b) => (b.local - a.local) || (b.score - a.score)); const pick = []; let sport = 0; const srcs = new Map();
-  for (const cap of [1, 2]) for (const it of items) { if (pick.length >= 3) break; if (pick.includes(it) || (it.sport && sport >= 1) || (srcs.get(it.src) || 0) >= cap) continue; pick.push(it); if (it.sport) sport++; srcs.set(it.src, (srcs.get(it.src) || 0) + 1); }
-  pick.sort((a, b) => items.indexOf(a) - items.indexOf(b));
+  const pick = ((D.news && D.news.items) || []).slice(0, 3); // already ranked by the collector: the stories the most outlets carry
   if (pick.length) { seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 2600 : 9000, slow: true }, { k: 'jingle', j: 'bump' }, { k: 'bed', b: 'news' }, { k: 'say', key: 's:news_' + (hr < 12 && hr >= 4 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : 'evening') });
     pick.forEach(it => seq.push({ k: 'low', kick: it.src.replace(/^the /, '').toUpperCase() + ' · ' + bulHM(it.ts), title: it.title, sub: '' }, { k: 'say', key: 'n:' + it.id, nocap: true }, { k: 'lowOff' }));
     seq.push({ k: 'bed', b: null }); }
