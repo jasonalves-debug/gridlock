@@ -50,9 +50,12 @@ def dedupe(L):
 
 
 def fsa_of(c, pts):
+    """The Scarborough postal area a call is in; None for calls outside Scarborough (the feed also covers the east end)."""
     m = re.match(r"(M1[A-Z])\b", c.get("loc") or "")
     if m:
         return m.group(1)
+    if not B.in_scarborough(c.get("lat"), c.get("lng")):
+        return None
     best, bd = None, 1e9
     for f, P in pts.items():
         for la, ln in P:
@@ -63,80 +66,81 @@ def fsa_of(c, pts):
 
 
 def scripts(live, bul, pts):
-    """{fsa: {segs: [{who, bed, items: [{t, k, ref}]}]}} for every Scarborough area. Each item is voiced on its own, so the
-    finished mix knows exactly when every call, headline and forecast starts (the map uses that to move the camera)."""
+    """{fsa: {segs: [{who, bed, jin, items: [{t, k, ref}]}]}} for every Scarborough area, plus "_front" and "_back": the parts of the
+    map's report everyone shares (its middle, the calls near you, is put together on the phone). Running order, like a morning show:
+    weather, then traffic (unplanned trouble only), then the news, starting with police and fire calls close to home, then Toronto's top stories.
+    Each item is voiced on its own, so the finished mix knows when every call, story and forecast starts (the map moves its camera on that)."""
     now = datetime.now(TORONTO)
     nts = now.timestamp()
     calls = [c for c in (live.get("calls") or []) if 0 <= nts - c.get("ts", 0) < 86400]
     for c in calls:
         c["_f"] = fsa_of(c, pts)
     hr = now.hour
-    greet = "Good morning" if 5 <= hr < 12 else "Good afternoon" if hr < 17 and hr >= 12 else "Good evening" if 17 <= hr < 22 else "Good evening, if you're still up"
+    greet = "Good morning" if 5 <= hr < 12 else "Good afternoon" if 12 <= hr < 17 else "Good evening"
     part = "this morning" if 4 <= hr < 12 else "this afternoon" if 12 <= hr < 17 else "tonight"
     date = f"{now.strftime('%A')}, {now.strftime('%B')} {ordinal(now.day)}"
     news = ((bul.get("news") or {}).get("items") or [])[:3]
-    tr, wx = (bul.get("traffic") or {}).get("text"), (bul.get("weather") or {}).get("text")
+    trd = bul.get("traffic") or {}
+    tr, wx = trd.get("text"), (bul.get("weather") or {}).get("text")
+    skip = set(trd.get("ids") or [])  # crashes already read in traffic
     A1, D1 = B.ANCHOR_NAME.split()[0], B.DESK_NAME.split()[0]
     I = lambda t, k, ref=None: {"t": t, "k": k, "ref": ref}
-    out_shared = None
-    if news or tr or wx:
-        sh = []
-        if news:
-            n = [I(f"In Toronto news {part}.", "newsintro")] + [I(B.news_line(x, k), "news", x["id"]) for k, x in enumerate(news)]
-            if tr or wx:
-                n.append(I(f"Now, traffic and weather together. Here's {D1}.", "toss"))
-            sh.append({"who": "anchor", "bed": "news", "items": n})
-        if tr or wx:
-            d = [I(f"Thanks, {A1}.", "deskhi")] + ([I(tr, "traffic")] if tr else []) + ([I("And the weather.", "wxintro"), I(wx, "weather")] if wx else []) + [I(f"I'm {B.DESK_NAME}.", "deskout")]
-            sh.append({"who": "desk", "bed": "desk", "items": d})
-        wet0 = bool(re.search(r"rain|showers|drizzle|snow|flurr|squall|thunder", wx or "", re.I))
-        bye0 = (["Grab an umbrella on the way out.", "Watch your footing out there.", "Take it easy on the roads."] if wet0 else
-                ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet0 else 4)]
-        sh.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report. I'm {B.ANCHOR_NAME}. {bye0}", "outro")]})
-        out_shared = {"segs": sh}
-    serious = sorted([c for c in calls if c.get("sev") in ("critical", "high") or c.get("act") in ("fire_struct", "gas", "crash3")], key=lambda c: -score(c, nts))
-    call_item = lambda c: I(f"{when(c['ts'], now)}, {lower_first(B.call_line(c))}", "call", c["id"])
+    line = lambda c: B.call_line(c, now)
+
+    desk = None
+    if tr or wx:
+        d = [I(f"Thanks, {A1}.", "deskhi")]
+        if wx:
+            d.append(I(wx, "weather"))
+        if tr:
+            d += ([I("Now the roads.", "roads")] if wx else []) + [I(tr, "traffic")]
+        d.append(I(f"I'm {B.DESK_NAME}.", "deskout"))
+        desk = {"who": "desk", "bed": "desk", "jin": "traffic", "items": d}
+    toss = [I(f"We'll start with your weather and traffic. Here's {D1}.", "toss")] if desk else []
+    city = None
+    if news:
+        city = {"who": "anchor", "bed": "news", "jin": "bump",
+                "items": [I(f"Across Toronto {part}.", "newsintro")] + [I(B.news_line(x, k), "news", x["id"]) for k, x in enumerate(news)]}
+    wet = bool(re.search(r"rain|showers|drizzle|snow|flurr|squall|thunder|fog", wx or "", re.I))
+    bye = (["Take it easy on the roads.", "Watch your footing out there.", "Give yourself a little extra time out there."] if wet else
+           ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet else 4)]
+    after = lambda name: f"And that's the Gridlock Report{' for ' + name if name else ''}. I'm {B.ANCHOR_NAME}. {bye}"
+
+    # the map's shared parts: open, weather and traffic, the toss to your calls ... then the city's news and the sign-off
+    hello = f"{greet + ', Scarborough' if 5 <= hr < 22 else 'You' + chr(39) + 're up late, Scarborough'}. It's {date}, and this is the Gridlock Report. I'm {B.ANCHOR_NAME}."
+    front = {"segs": [{"who": "anchor", "bed": None, "items": [I(hello, "intro")] + toss}] + ([desk] if desk else []) +
+             [{"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if desk else "") + "Now to the news, starting close to home.", "newsin")]}]}
+    back = {"segs": ([city] if city else []) + [{"who": "anchor", "bed": None, "items": [I(after(""), "outro")]}]}
+
+    serious = sorted([c for c in calls if c["id"] not in skip and line(c) and (c.get("sev") in ("critical", "high") or c.get("act") in ("fire_struct", "gas", "crash3"))],
+                     key=lambda c: -score(c, nts))
     out = {}
     for f, name in B.FSA_NAMES.items():
         mine = [c for c in calls if c["_f"] == f]
-        feat = dedupe(sorted([c for c in mine if c.get("act") not in ("medical", "fire_alarm") and B.call_line(c)], key=lambda c: -score(c, nts)))[:3]
-        feat.sort(key=lambda c: c["ts"])
+        feat = dedupe(sorted([c for c in mine if c["id"] not in skip and c.get("act") not in ("medical", "fire_alarm") and line(c)], key=lambda c: -score(c, nts)))[:3]
         minor = len(mine) - len(feat)
-        it = [I(f"{greet}. This is the Gridlock Report for {name}, {date}. I'm {B.ANCHOR_NAME}.", "intro")]
-        if feat:
-            it.append(I("Here's what happened in your area over the last day.", "local"))
-            it += [call_item(c) for c in feat]
-        else:
-            it.append(I(f"It's been a quiet day in {name}. Nothing serious reported in the last day.", "quiet"))
+        it = [I(f"{greet}. It's {date}, and this is the Gridlock Report for {name}. I'm {B.ANCHOR_NAME}.", "intro")] + toss
+        local = [I((f"Thanks, {D1}. " if desk else "") + f"Now to the news, starting here in {name}.", "newsin")]
+        for k, c in enumerate(feat):  # the most serious first, the way a newscast leads
+            s = line(c)
+            local.append(I(s if k == 0 else (f"Also in {name}, " if k == 1 else "And ") + lower_first(s), "call", c["id"]))
+        if not feat:
+            local.append(I(f"It's been a quiet day in {name}, with nothing serious reported in the last twenty-four hours.", "quiet"))
         if minor > 0:
             fm = [c for c in mine if c not in feat]
             med = sum(1 for c in fm if c.get("act") in ("medical", "fire_alarm"))
             kind = "mostly medical calls and alarms" if med * 2 >= len(fm) else "mostly minor police calls"
-            it.append(I("There was also one smaller call." if minor == 1 else f"There were also {B.words(minor) if minor <= 20 else minor} smaller calls, {kind}.", "minor"))
-        wide = sorted(dedupe([c for c in serious if c["_f"] != f])[: 1 if len(feat) >= 2 else 2], key=lambda c: c["ts"])
-        if wide:
-            it.append(I("Elsewhere in Scarborough.", "wider"))
-            it += [call_item(c) for c in wide]
-        segs = [{"who": "anchor", "bed": "wire", "items": it}]
-        if news:
-            n = [I(f"In Toronto news {part}.", "newsintro")] + [I(B.news_line(x, k), "news", x["id"]) for k, x in enumerate(news)]
-            if tr or wx:
-                n.append(I(f"Now, traffic and weather together. Here's {D1}.", "toss"))
-            segs.append({"who": "anchor", "bed": "news", "items": n})
-        if tr or wx:
-            d = [I(f"Thanks, {A1}.", "deskhi")]
-            if tr:
-                d.append(I(tr, "traffic"))
-            if wx:
-                d += [I("And the weather.", "wxintro"), I(wx, "weather")]
-            d.append(I(f"I'm {B.DESK_NAME}.", "deskout"))
-            segs.append({"who": "desk", "bed": "desk", "items": d})
-        wet = bool(re.search(r"rain|showers|drizzle|snow|flurr|squall|thunder", wx or "", re.I))
-        bye = (["Grab an umbrella on the way out.", "Watch your footing out there.", "Take it easy on the roads."] if wet else
-               ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet else 4)]
-        segs.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report for {name}. I'm {B.ANCHOR_NAME}. {bye}", "outro")]})
+            local.append(I(f"There was also one smaller call in the area." if minor == 1 else f"There were also {B.words(minor)} smaller calls in the area, {kind}.", "minor"))
+        wide = dedupe([c for c in serious if c["_f"] != f])[: 1 if len(feat) >= 2 else 2]
+        said = set()
+        for c in wide:
+            reg = "Scarborough" if B.in_scarborough(c.get("lat"), c.get("lng")) else "the city"
+            local.append(I((f"Elsewhere in {reg}, " if reg not in said else "And ") + lower_first(line(c)), "call", c["id"]))
+            said.add(reg)
+        segs = [{"who": "anchor", "bed": None, "items": it}] + ([desk] if desk else []) + [{"who": "anchor", "bed": "wire", "items": local}]
+        segs += ([city] if city else []) + [{"who": "anchor", "bed": None, "items": [I(after(name), "outro")]}]
         out[f] = {"name": name, "segs": segs, "local": len(feat), "minor": max(0, minor)}
-    out["_shared"] = out_shared
+    out["_front"], out["_back"] = front, back
     return out
 
 
@@ -324,9 +328,9 @@ def am_voice(m, x):
     return (y * (0.16 / rms)).astype(np.float32)
 
 
-def render(ep, head="open"):
+def render(ep, head="open", close=True):
     """The finished episode as MP3 bytes, its length, and a cue sheet: when each jingle and each spoken item starts.
-    head="bump" makes the shared back half the map plays after its own 1 km opening."""
+    head="bump" starts on a short bump (the map's shared closing half); close=False leaves off the closing theme (its opening half)."""
     import lameenc
     m = Mix(30)
     np = m.np
@@ -337,11 +341,12 @@ def render(ep, head="open"):
     t -= 0.9 if head == "open" else 0.25
     segs = ep["segs"]
     for k, sg in enumerate(segs):
-        if k >= 1 and sg["bed"] == "news":
+        jin = sg.get("jin") if (k >= 1 or head is None) else None
+        if jin == "bump":
             d = jingle(m, "bump", t + 0.35)
             cues.append({"t": round(t + 0.35, 2), "d": d, "k": "bump"})
             t += d + 0.05
-        elif sg["who"] == "desk":
+        elif jin == "traffic":
             d = jingle(m, "traffic", t + 0.3)
             cues.append({"t": round(t + 0.3, 2), "d": d, "k": "sting"})
             t += d + 0.1
@@ -363,9 +368,10 @@ def render(ep, head="open"):
                 c["ref"] = item["ref"]
             cues.append(c)
         t += dur + (0.45 if k < len(segs) - 1 else 0.15)
-    d = jingle(m, "close", t - 0.2)
-    cues.append({"t": round(t - 0.2, 2), "d": d, "k": "close"})
-    t += d - 0.2
+    if close:
+        d = jingle(m, "close", t - 0.2)
+        cues.append({"t": round(t - 0.2, 2), "d": d, "k": "close"})
+        t += d - 0.2
     buf = m.buf[: int((t + 0.6) * SR)]
     n = len(buf)
     hiss = m.filt("bandpass", [2000, 6000], np.random.uniform(-1, 1, n).astype(np.float32)) * 0.006
@@ -397,7 +403,7 @@ def podcast(f, name, files):
                   f"<itunes:duration>{int(e['dur'])}</itunes:duration></item>")
     return (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\"><channel>"
             f"<title>The Gridlock Report: {esc(name)} ({f})</title><link>{PAGE}</link><language>en-ca</language>"
-            f"<description>A 90-second local report for {esc(name)}, Scarborough: police and fire calls in your area, the top Toronto stories, 401 and DVP traffic and the weather. Refreshed through the day.</description>"
+            f"<description>A short local report for {esc(name)}, Scarborough: the weather and traffic, then the news, starting with police and fire calls in your area, then the top Toronto stories. Refreshed through the day.</description>"
             f"<itunes:author>GRIDLOCK</itunes:author><itunes:image href=\"{COVER}\"/><itunes:explicit>false</itunes:explicit><itunes:category text=\"News\"/>"
             f"<ttl>15</ttl>{items}</channel></rss>\n")
 
@@ -415,18 +421,22 @@ def build():
     os.makedirs(EP_DIR, exist_ok=True)
     os.makedirs(POD_DIR, exist_ok=True)
     eps = scripts(live, bul, pts)
-    shared_ep = eps.pop("_shared", None)
-    shared = prev.get("shared") or {}
-    if shared_ep:  # the back half every map listener hears after their own 1 km opening
-        skey = hashlib.sha1((B.ANCHOR + B.DESK + json.dumps(shared_ep["segs"])).encode()).hexdigest()[:12]
-        if skey != shared.get("key") or not shared.get("file") or not os.path.exists(path(shared["file"])):
-            try:
-                data, dur, cues = render(shared_ep, head="bump")
-                rel = f"episodes/shared-{datetime.now(TORONTO).strftime('%Y%m%d-%H%M%S')}.mp3"
-                open(path(rel), "wb").write(data)
-                shared = {"file": rel, "dur": dur, "cues": cues, "at": int(time.time()), "key": skey, "prev": shared.get("file")}
-            except Exception as e:  # noqa: BLE001
-                print("shared episode failed:", e)
+    parts = {}
+    for name, head, close in (("front", "open", False), ("back", "bump", True)):  # the map's shared opening and closing
+        ep, old = eps.pop("_" + name, None), prev.get(name) or {}
+        parts[name] = old
+        if not ep:
+            continue
+        key = hashlib.sha1((B.ANCHOR + B.DESK + json.dumps(ep["segs"])).encode()).hexdigest()[:12]
+        if key == old.get("key") and old.get("file") and os.path.exists(path(old["file"])):
+            continue
+        try:
+            data, dur, cues = render(ep, head=head, close=close)
+            rel = f"episodes/{name}-{datetime.now(TORONTO).strftime('%Y%m%d-%H%M%S')}.mp3"
+            open(path(rel), "wb").write(data)
+            parts[name] = {"file": rel, "dur": dur, "cues": cues, "at": int(time.time()), "key": key, "prev": old.get("file")}
+        except Exception as e:  # noqa: BLE001
+            print(f"{name} part failed:", e)
     pf = prev.get("fsa") or {}
     order = sorted(eps, key=lambda f: (pf.get(f) or {}).get("at", 0))  # stalest first
     made, out = 0, {}
@@ -457,11 +467,11 @@ def build():
         out[f] = entry
         open(os.path.join(POD_DIR, f + ".xml"), "w").write(podcast(f, ep["name"], list(reversed(entry["hist"]))))
     keep = {h["file"].split("/")[-1] for e in out.values() for h in (e.get("hist") or [])} | {e["file"].split("/")[-1] for e in out.values() if e.get("file")}
-    keep |= {x.split("/")[-1] for x in (shared.get("file"), shared.get("prev")) if x}
+    keep |= {x.split("/")[-1] for p_ in parts.values() for x in (p_.get("file"), p_.get("prev")) if x}
     for fn in os.listdir(EP_DIR):
         if fn.endswith(".mp3") and fn not in keep:
             os.remove(os.path.join(EP_DIR, fn))
-    save(OUT, {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "shared": shared, "fsa": out, "names": B.FSA_NAMES, "points": pts})
+    save(OUT, {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "front": parts.get("front") or {}, "back": parts.get("back") or {}, "fsa": out, "names": B.FSA_NAMES, "points": pts})
     print(f"episodes: {made} rendered, {sum(1 for e in out.values() if e.get('file'))}/{len(out)} areas ready, {time.time() - t0:.0f}s")
 
 

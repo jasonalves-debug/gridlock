@@ -1,5 +1,5 @@
-// ---------------------------------------------------------------- "Near me": a vintage local newscast. What happened within 1 km of you, the headlines,
-// 401 / DVP traffic and the weather, voiced by the collector (Kokoro), cut together here with synthesised jingles, then the live map at your door.
+// ---------------------------------------------------------------- "Near me": a vintage local newscast. Weather, traffic (unplanned trouble only), then the
+// news: calls within 1 km of you, then Toronto's top stories. Voiced by the collector (Kokoro), cut together here with synthesised jingles, then the live map at your door.
 const BUL = { on: false, want: false, data: null, dataP: null, geoP: null, me: null, seq: [], stop: false, srcs: new Set(), bufs: new Map(), marks: [], ring: null, bedKind: null, bedT: 0, nodes: null, holdT: 0, t0: 0 };
 const BUL_R = 1000, BUL_HOME = { lat: 43.74537, lng: -79.29472, home: true }; // Lawrence Ave E & Warden Ave
 (function bulUI() {
@@ -52,7 +52,7 @@ body.bul #hud, body.bul #tools, body.bul #ticker, body.bul #pulse, body.bul #now
   document.body.appendChild(el);
   const modes = document.querySelector('#start .modes');
   if (modes) { const b = document.createElement('button'); b.className = 'mode news'; b.id = 'goNews'; b.type = 'button';
-    b.innerHTML = '<span class="tag">● NEAR ME · THE GRIDLOCK REPORT</span><b>My morning report</b><span>Zooms to where you are and reads what happened within 1 km in the last day, then the headlines, 401 and DVP traffic and the weather.</span>';
+    b.innerHTML = '<span class="tag">● NEAR ME · THE GRIDLOCK REPORT</span><b>My morning report</b><span>Weather and traffic first, then the news: police and fire calls within 1 km of you, then Toronto&rsquo;s top stories. The map follows along and ends at your door.</span>';
     modes.insertBefore(b, modes.firstChild); }
   const tv = document.getElementById('tvBtn'); if (tv) { const nb = document.createElement('button'); nb.type = 'button'; nb.className = 'tool'; nb.id = 'newsBtn'; nb.hidden = true; nb.setAttribute('aria-label', 'Play my report'); nb.title = 'The Gridlock Report: what happened near you';
     nb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9l10-5" stroke-linecap="round"/><circle cx="8.5" cy="14.5" r="2.5"/><path d="M14 13h4M14 16h4" stroke-linecap="round"/></svg>'; tv.parentNode.insertBefore(nb, tv); }
@@ -155,44 +155,51 @@ async function bulSay(key, text, nocap) {
 const bulWait = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------------------------------------------------------------- the script
-function bulKeyTime(ts) { if (Date.now() / 1000 - ts < 3600) return 's:t_recent'; const d = new Date(ts * 1000), now = new Date(); return (d.toDateString() === now.toDateString() ? 's:t_today_' : 's:t_yday_') + d.getHours(); }
-function bulPlace(c) { const loc = c.loc || ''; const m = loc.match(/^(M1[A-Z])/); if (m || !loc) return m ? m[1] + ' area' : 'Scarborough'; return loc.split(' - ').filter(p => !/^Ln\b/.test(p)).map(p => p.replace(/\bMc([a-z])/g, (a, b) => 'Mc' + b.toUpperCase())).join(' & '); }
+function bulPlace(c) { const loc = c.loc || ''; const m = loc.match(/^(M1[A-Z])/); if (m || !loc) return m ? m[1] + ' area' : 'Scarborough'; return loc.split(/ - | & /).filter(p => !/^(Ln|Ww|Wy)\b/.test(p)).map(p => p.replace(/\bMc([a-z])/g, (a, b) => 'Mc' + b.toUpperCase())).join(' & '); }
 function bulLine(c) { const L = BUL.data && BUL.data.lines && BUL.data.lines[c.id]; if (L) return L; const lab = (c.label || 'a call').toLowerCase().replace('&', 'and'); return `${c.src === 'tps' ? 'Police' : 'Toronto Fire'} responded to ${/^[aeiou]/.test(lab) ? 'an' : 'a'} ${lab}, ${bulPlace(c).replace('&', 'and')}.`; }
 function bulDedupe(L) { const out = []; for (const o of L) { if (out.some(k => Math.abs(k.c.ts - o.c.ts) < 3 * 3600 && Math.hypot(k.x - o.x, k.y - o.y) < 150 && (k.c.label === o.c.label || (k.c.act.startsWith('crash') && o.c.act.startsWith('crash'))))) continue; out.push(o); } return out; }
 const BUL_SEV = { critical: 4, high: 3, medium: 2, low: 1 };
 function bulScore(o) { const c = o.c; return (BUL_SEV[c.sev] || 1) + (c.act === 'crash2' || c.act === 'crash3' || c.act === 'fire_struct' || c.act === 'gas' ? 0.6 : 0) - o.age / 86400 * 0.8; }
 function bulMinor(c) { return c.act === 'medical' || c.act === 'fire_alarm'; }
-function bulBuild(me, sharedTail) { // your own 1 km opening; then either the collector's produced back half (sharedTail) or the stitched one
-  const D = BUL.data || {}, hr = new Date().getHours(), seq = [], calls = h24calls().filter(o => (BUL_SEV[o.c.sev] || 0) > 0);
+// Running order, like a morning show: weather and traffic, then the news, starting with the calls within 1 km of you, then Toronto's top stories.
+// The collector produces the shared opening (weather, traffic) and closing (headlines, sign-off) as finished audio; your calls are cut in between here.
+function bulBuild(me, front, back) {
+  const D = BUL.data || {}, hr = new Date().getHours(), seq = [], skip = new Set((D.traffic && D.traffic.ids) || []);
+  const gen = D.generated ? Date.parse(D.generated) / 1000 : 0; // a call the collector saw but wrote no line for isn't fit to read out (unclear code, medical...)
+  const calls = h24calls().filter(o => (BUL_SEV[o.c.sev] || 0) > 0 && !skip.has(o.c.id) && !(D.lines && !D.lines[o.c.id] && o.c.ts < gen && !bulMinor(o.c)));
   const greet = hr >= 5 && hr < 12 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : hr >= 17 && hr < 22 ? 'evening' : 'night';
   const meXY = me && me.inside ? me : null, far = o => !meXY || Math.hypot(o.x - meXY.x, o.y - meXY.y) > (/\(approx|^M1/i.test(o.c.loc || '') ? 1500 : BUL_R);
-  seq.push({ k: 'card' }, { k: 'jingle', j: 'open' }, { k: 'cardOff' });
-  seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 1500 : 9000, slow: true }, ...(D.clips && D.clips['s:intro_' + greet] ? [{ k: 'say', key: 's:intro_' + greet }] : [{ k: 'say', key: 's:greet_' + greet }, { k: 'say', key: 's:intro' }]));
+  const home = h => ({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? h : 9000, slow: true });
+  if (front) seq.push({ k: 'part', which: 'front' });
+  else { // the same opening stitched from single clips
+    seq.push({ k: 'card' }, { k: 'jingle', j: 'open' }, { k: 'cardOff' }, home(1500), ...(D.clips && D.clips['s:intro_' + greet] ? [{ k: 'say', key: 's:intro_' + greet }] : [{ k: 'say', key: 's:greet_' + greet }, { k: 'say', key: 's:intro' }]));
+    if (D.traffic || D.weather) { seq.push({ k: 'say', key: 's:toss_wx' }, { k: 'jingle', j: 'traffic' }, { k: 'bed', b: 'desk' }, { k: 'say', key: 's:desk_hi' });
+      if (D.weather) seq.push({ k: 'board', kind: 'weather' }, { k: 'say', key: 'weather' }, { k: 'boardOff' });
+      if (D.traffic) { const hw = bulHwyView(meXY); seq.push(...(D.weather ? [{ k: 'say', key: 's:desk_roads' }] : []), { k: 'cam', x: hw.x, y: hw.y, h: 1800, slow: true }, { k: 'board', kind: 'traffic' }, { k: 'say', key: 'traffic' }, { k: 'boardOff' }); }
+      seq.push({ k: 'say', key: 's:desk_out' }, { k: 'bed', b: null }, { k: 'say', key: 's:news_in' }); }
+  }
   let near = [], feat = [];
-  if (meXY) { near = calls.filter(o => !far(o)); feat = bulDedupe(near.filter(o => !bulMinor(o.c)).sort((a, b) => bulScore(b) - bulScore(a))).slice(0, 4).sort((a, b) => a.c.ts - b.c.ts); }
-  const callItem = (o, lab) => { const c = o.c, dist = meXY ? Math.round(Math.hypot(o.x - meXY.x, o.y - meXY.y) / 10) * 10 : 0;
+  if (meXY) { near = calls.filter(o => !far(o)); feat = bulDedupe(near.filter(o => !bulMinor(o.c)).sort((a, b) => bulScore(b) - bulScore(a))).slice(0, 4); } // most serious first
+  const callItem = o => { const c = o.c, dist = meXY ? Math.round(Math.hypot(o.x - meXY.x, o.y - meXY.y) / 10) * 10 : 0;
     seq.push({ k: 'cam', x: o.x, y: o.y, h: 420, mark: o, slow: true }, { k: 'low', kick: `${c.src === 'tps' ? 'TORONTO POLICE' : 'TORONTO FIRE'} · ${bulHM(c.ts)}`, title: (c.label || '').toUpperCase(), sub: bulPlace(c) + (dist ? ` · ${dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m'} from you` : '') },
-      ...(bulTimed(c) ? [] : [{ k: 'say', key: bulKeyTime(c.ts) }]), { k: 'say', key: 'c:' + c.id, text: bulLine(c) }, { k: 'lowOff' }); };
+      { k: 'say', key: 'c:' + c.id, text: bulLine(c) }, { k: 'lowOff' }); };
+  seq.push(home(1400), { k: 'bed', b: 'wire' });
   if (!me) seq.push({ k: 'say', key: 's:no_loc' }); else if (!me.inside) seq.push({ k: 'say', key: 's:near_out' });
-  else { seq.push({ k: 'ring', on: true }, { k: 'say', key: feat.length ? 's:near' : 's:near_quiet' }); }
-  if (feat.length) { seq.push({ k: 'ring', on: false }, { k: 'bed', b: 'wire' }); feat.forEach(o => callItem(o)); }
-  const minor = near.length - feat.length; if (minor > 0) seq.push({ k: 'cam', x: meXY.x, y: meXY.y, h: 1500 }, { k: 'say', key: 's:minor_' + Math.min(40, minor) });
-  const wide = calls.filter(o => far(o) && (o.c.sev === 'critical' || o.c.sev === 'high' || o.c.act === 'fire_struct' || o.c.act === 'gas' || o.c.act === 'crash3')).sort((a, b) => bulScore(b) - bulScore(a)); const wideP = bulDedupe(wide.filter(o => !feat.includes(o))).slice(0, feat.length >= 3 ? 1 : feat.length ? 2 : 3).sort((a, b) => a.c.ts - b.c.ts);
-  if (wideP.length) { seq.push({ k: 'ring', on: false }, { k: 'bed', b: 'wire' }, { k: 'say', key: feat.length ? 's:wider' : (me && me.inside ? 's:wider2' : 's:top') }); wideP.forEach(o => callItem(o)); }
-  seq.push({ k: 'bed', b: null }, { k: 'ring', on: false });
-  if (sharedTail) { seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 2600 : 9000, slow: true }, { k: 'shared' }); return seq; }
+  else seq.push({ k: 'ring', on: true }, { k: 'say', key: feat.length ? 's:near' : 's:near_quiet' });
+  if (feat.length) { seq.push({ k: 'ring', on: false }); feat.forEach(callItem); }
+  const minor = near.length - feat.length; if (minor > 0) seq.push(home(1800), { k: 'say', key: 's:minor_' + Math.min(40, minor) });
+  const wide = calls.filter(o => far(o) && (o.c.sev === 'critical' || o.c.sev === 'high' || o.c.act === 'fire_struct' || o.c.act === 'gas' || o.c.act === 'crash3')).sort((a, b) => bulScore(b) - bulScore(a)); const wideP = bulDedupe(wide.filter(o => !feat.includes(o))).slice(0, feat.length >= 3 ? 1 : feat.length ? 2 : 3);
+  const scarb = c => c.lat == null || (c.lat > 43.66 && c.lng > -79.2885 - 0.367 * (c.lat - 43.6915) - 0.003); // east of Victoria Park (same test as the collector)
+  if (wideP.length) { const all = wideP.every(o => scarb(o.c)); seq.push({ k: 'ring', on: false }, home(5000), { k: 'say', key: feat.length ? (all ? 's:wider' : 's:wider_city') : (me && me.inside ? (all ? 's:wider2' : 's:wider2_city') : 's:top') }); wideP.forEach(callItem); }
+  seq.push({ k: 'bed', b: null }, { k: 'ring', on: false }, home(2600));
+  if (back) { seq.push({ k: 'part', which: 'back' }); return seq; }
   const pick = ((D.news && D.news.items) || []).slice(0, 3); // already ranked by the collector: the stories the most outlets carry
-  if (pick.length) { seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 2600 : 9000, slow: true }, { k: 'jingle', j: 'bump' }, { k: 'bed', b: 'news' }, { k: 'say', key: 's:news_' + (hr < 12 && hr >= 4 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : 'evening') });
+  if (pick.length) { seq.push({ k: 'jingle', j: 'bump' }, { k: 'bed', b: 'news' }, { k: 'say', key: 's:news_' + (hr < 12 && hr >= 4 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : 'evening') });
     pick.forEach(it => seq.push({ k: 'low', kick: it.src.replace(/^the /, '').toUpperCase() + ' · ' + bulHM(it.ts), title: it.title, sub: '' }, { k: 'say', key: 'n:' + it.id, nocap: true }, { k: 'lowOff' }));
     seq.push({ k: 'bed', b: null }); }
-  if (D.traffic || D.weather) { seq.push({ k: 'say', key: 's:toss' }, { k: 'jingle', j: 'traffic' }, { k: 'bed', b: 'desk' }, { k: 'say', key: 's:desk_hi' });
-    if (D.traffic) { const hw = bulHwyView(meXY); seq.push({ k: 'cam', x: hw.x, y: hw.y, h: 1800, slow: true }, { k: 'board', kind: 'traffic' }, { k: 'say', key: 'traffic' }, { k: 'boardOff' }); }
-    if (D.weather) seq.push({ k: 'jingle', j: 'weather' }, { k: 'say', key: 's:desk_wx' }, { k: 'board', kind: 'weather' }, { k: 'say', key: 'weather' }, { k: 'boardOff' }, { k: 'say', key: 's:desk_out' });
-    seq.push({ k: 'bed', b: null }, { k: 'say', key: 's:thanks' }); }
-  seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 900 : 6000, slow: true }, { k: 'say', key: 's:signoff' }, { k: 'jingle', j: 'close' });
+  seq.push(home(900), { k: 'say', key: 's:signoff' }, { k: 'jingle', j: 'close' });
   return seq;
 }
-function bulTimed(c) { const k = BUL.data && BUL.data.clips && BUL.data.clips['c:' + c.id]; return !!(k && k.f && /^(Within|Around|Overnight|Early|Yesterday|Last night)/.test(k.t || '')); } // the clip already says when
 function bulHwyView(me) { // a stretch of the 401 near the listener
   let best = null, bd = 1e18; const ex = me ? me.x : 0, ey = me ? me.y : 0;
   for (let e = 0; e < G.cls.length; e += 3) { if (G.cls[e] !== 0) continue; const a = G.ea ? G.ea[e] : -1; if (a < 0) continue; const x = G.nx[a], y = G.ny[a], d = (x - ex) ** 2 + (y - ey) ** 2; if (d < bd) { bd = d; best = { x, y }; } }
@@ -225,7 +232,7 @@ async function bulRun() {
     else if (s.k === 'board') bulBoard(s.kind);
     else if (s.k === 'boardOff') $('bulBoard').classList.remove('show');
     else if (s.k === 'say') { await bulSay(s.key, s.text, s.nocap); await bulWait(320); }
-    else if (s.k === 'shared' && BUL.sharedBuf) { await bulPlayShared(); break; }
+    else if (s.k === 'part') { await bulPlayPart(s.which); }
   }
   bulEnd();
 }
@@ -239,23 +246,25 @@ async function bulStart() {
   let g = geo && !geo.err ? geo : null;
   if (!g) g = BUL_HOME; // no location from the phone (and none saved): 1 km around Lawrence and Warden
   if (g) { const P = G.proj, x = (g.lng - P.lon0) * P.kx, y = -(g.lat - P.lat0) * P.ky; BUL.me = { x, y, lat: g.lat, lng: g.lng, inside: inMap(x, y) }; } else BUL.me = null;
-  // the produced back half (headlines, traffic, weather, sign-off) everyone shares; your 1 km opening is put together here
-  const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]), sh = eps && eps.shared;
-  BUL.sharedBuf = null; BUL.shared = sh && sh.file && sh.cues ? sh : null;
-  const sharedP = BUL.shared ? fetch(FEED_BASE + sh.file).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(b => new Promise((res, rej) => AC.decodeAudioData(b, res, rej))).catch(() => null) : Promise.resolve(null);
+  // the produced opening (weather, traffic) and closing (headlines, sign-off) everyone shares; your calls are cut in between here
+  const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]);
+  const get = p => p && p.file && p.cues ? fetch(FEED_BASE + p.file).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(b => new Promise((res, rej) => AC.decodeAudioData(b, res, rej))).catch(() => null) : Promise.resolve(null);
   $('bulMsg').textContent = 'WARMING UP THE TUBES…';
-  BUL.sharedBuf = await Promise.race([sharedP, bulWait(12000).then(() => null)]);
-  BUL.seq = bulBuild(BUL.me, !!BUL.sharedBuf);
+  const [fb, bb] = await Promise.race([Promise.all([get(eps && eps.front), get(eps && eps.back)]), bulWait(12000).then(() => [null, null])]);
+  BUL.parts = { front: fb ? { buf: fb, cues: eps.front.cues } : null, back: bb ? { buf: bb, cues: eps.back.cues } : null };
+  BUL.seq = bulBuild(BUL.me, !!BUL.parts.front, !!BUL.parts.back);
   const keys = BUL.seq.filter(s => s.k === 'say').map(s => s.key); await Promise.race([Promise.all(keys.slice(0, 14).map(bulLoad)), bulWait(6000)]); keys.forEach(bulLoad);
   clearInterval(tick); clearInterval(sweep); lead.hidden = true;
   if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); }
   BUL.t0 = performance.now(); bulRun();
 }
-function bulPlayShared() { // plays the produced back half; its cue sheet drives the map
-  return new Promise(res => { const N = bulAudio(), src = AC.createBufferSource(); src.buffer = BUL.sharedBuf; src.connect(N.out); BUL.srcs.add(src);
+function bulPlayPart(which) { // plays a produced part; its cue sheet drives the map
+  const P = BUL.parts && BUL.parts[which]; if (!P || BUL.stop) return Promise.resolve();
+  return new Promise(res => { const N = bulAudio(), src = AC.createBufferSource(); src.buffer = P.buf; src.connect(N.out); BUL.srcs.add(src);
     if (N.hiss) N.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.3); // the produced mix has its own
-    src.onended = () => { BUL.srcs.delete(src); res(); }; const t0 = AC.currentTime + 0.05; src.start(t0);
-    BUL.ep = { t0, i: 0, cues: BUL.shared.cues.slice().sort((a, b) => a.t - b.t), cardOff: 0 }; });
+    src.onended = () => { BUL.srcs.delete(src); BUL.ep = null; if (N.hiss && BUL.on) N.hiss.gain.setTargetAtTime(0.012, AC.currentTime, 0.3); $('bulCard').classList.remove('show'); res(); };
+    const t0 = AC.currentTime + 0.05; src.start(t0);
+    BUL.ep = { t0, i: 0, cues: P.cues.slice().sort((a, b) => a.t - b.t), cardOff: 0 }; });
 }
 function bulCue(c) { // what the map does when the voice gets to each part
   const me = BUL.me && BUL.me.inside ? BUL.me : null, D = BUL.data || {}, cap = $('bulCap'), low = $('bulLow');
@@ -275,10 +284,12 @@ function bulCue(c) { // what the map does when the voice gets to each part
     case 'bump': case 'newsintro': home(2600); break;
     case 'news': { const it = ((D.news && D.news.items) || []).find(x => x.id === c.ref); const outs = it ? (it.outlets || [it.src]).filter(o => o !== 'Google News') : [];
       $('bulLK').textContent = (outs.length ? outs.slice(0, 3).join(' · ') : 'TORONTO NEWS').toUpperCase(); $('bulLT').textContent = it ? it.title : c.txt; $('bulLS').style.display = 'none'; low.classList.add('show'); break; }
-    case 'traffic': { const hw = bulHwyView(me); camGoal = { x: hw.x, y: hw.y, h: 1800 }; bulBoard('traffic'); break; }
-    case 'wxintro': $('bulBoard').classList.remove('show'); home(2600); break;
+    case 'deskhi': home(2600); break;
     case 'weather': bulBoard('weather'); break;
+    case 'roads': $('bulBoard').classList.remove('show'); break;
+    case 'traffic': { const hw = bulHwyView(me); camGoal = { x: hw.x, y: hw.y, h: 1800 }; bulBoard('traffic'); break; }
     case 'deskout': $('bulBoard').classList.remove('show'); break;
+    case 'newsin': $('bulBoard').classList.remove('show'); home(1400); break;
     case 'outro': $('bulBoard').classList.remove('show'); home(900); BUL.ring = me; break;
     case 'close': cap.textContent = ''; break;
   }
