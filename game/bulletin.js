@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------- "Near me": a vintage local newscast. What happened within 1 km of you, the headlines,
 // 401 / DVP traffic and the weather, voiced by the collector (Kokoro), cut together here with synthesised jingles, then the live map at your door.
 const BUL = { on: false, want: false, data: null, dataP: null, geoP: null, me: null, seq: [], stop: false, srcs: new Set(), bufs: new Map(), marks: [], ring: null, bedKind: null, bedT: 0, nodes: null, holdT: 0, t0: 0 };
-const BUL_R = 1000;
+const BUL_R = 1000, BUL_HOME = { lat: 43.74537, lng: -79.29472, home: true }; // Lawrence Ave E & Warden Ave
 (function bulUI() {
   const st = document.createElement('style');
   st.textContent = `#bul { position: fixed; inset: 0; z-index: 30; pointer-events: none; font-family: 'Alfa Slab One', Rockwell, 'Roboto Slab', Georgia, serif; color: #f4ead2; }
@@ -59,16 +59,20 @@ body.bul #hud, body.bul #tools, body.bul #ticker, body.bul #pulse, body.bul #now
   const lede = document.getElementById('lede'); if (lede) { const q = document.createElement('button'); q.id = 'newsQuick'; q.type = 'button'; q.textContent = '▶ Play my morning report'; lede.after(q); }
 })();
 function bulHM(ts) { return new Date(ts * 1000).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace('a.m.', 'AM').replace('p.m.', 'PM'); }
+function bulGeo() { // your position, or why we couldn't get it (falls back to the spot you saved last time)
+  return new Promise(res => { let done = false; const fin = v => { if (!done) { done = true; res(v); } }, saved = () => store.get('bulMe', null);
+    if (!navigator.geolocation || !window.isSecureContext) return fin(saved() || { err: 'unsupported' });
+    try { navigator.geolocation.getCurrentPosition(p => { const v = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; store.set('bulMe', v); fin(v); },
+      e => fin(saved() || { err: e && e.code === 1 ? 'denied' : 'unavailable' }), { enableHighAccuracy: false, timeout: 12000, maximumAge: 15 * 60000 }); } catch (e) { fin(saved() || { err: 'unsupported' }); }
+    setTimeout(() => fin(saved() || { err: 'unavailable' }), 13000); });
+}
 function bulGo() { bulArm(); begin('live'); }
 function bulArm() {
   audioInit(); if (muted) setMuted(false); BUL.want = true;
   try { if (!document.getElementById('bulFont')) { const l = document.createElement('link'); l.id = 'bulFont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Special+Elite&display=swap'; document.head.appendChild(l); } } catch (e) {}
   BUL.epP = fetch(FEED_BASE + 'episodes.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   BUL.dataP = fetch(FEED_BASE + 'bulletin.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
-  BUL.geoP = new Promise(res => { let done = false; const fin = v => { if (!done) { done = true; res(v); } };
-    if (!navigator.geolocation) return fin(store.get('bulMe', null));
-    navigator.geolocation.getCurrentPosition(p => { const v = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; store.set('bulMe', v); fin(v); }, () => fin(store.get('bulMe', null)), { enableHighAccuracy: false, timeout: 9000, maximumAge: 15 * 60000 });
-    setTimeout(() => fin(store.get('bulMe', null)), 10000); });
+  BUL.geoP = bulGeo();
 }
 $('goNews').onclick = bulGo;
 $('newsBtn').onclick = () => { if (BUL.on || !ready) return; snd('ui'); bulArm(); bulStart(); };
@@ -232,7 +236,9 @@ async function bulStart() {
   const sweep = setInterval(() => { const a = ((performance.now() % 800) / 800) * 360; lead.querySelector('.c').style.setProperty('--a', a + 'deg'); }, 30);
   const [data, geo] = await Promise.all([Promise.race([BUL.dataP, bulWait(9000).then(() => null)]), Promise.race([BUL.geoP, bulWait(10000).then(() => null)])]);
   BUL.data = data || { clips: {}, lines: {} };
-  if (geo) { const P = G.proj, x = (geo.lng - P.lon0) * P.kx, y = -(geo.lat - P.lat0) * P.ky; BUL.me = { x, y, lat: geo.lat, lng: geo.lng, inside: inMap(x, y) }; } else BUL.me = null;
+  let g = geo && !geo.err ? geo : null;
+  if (!g) g = BUL_HOME; // no location from the phone (and none saved): 1 km around Lawrence and Warden
+  if (g) { const P = G.proj, x = (g.lng - P.lon0) * P.kx, y = -(g.lat - P.lat0) * P.ky; BUL.me = { x, y, lat: g.lat, lng: g.lng, inside: inMap(x, y) }; } else BUL.me = null;
   // the produced back half (headlines, traffic, weather, sign-off) everyone shares; your 1 km opening is put together here
   const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]), sh = eps && eps.shared;
   BUL.sharedBuf = null; BUL.shared = sh && sh.file && sh.cues ? sh : null;
