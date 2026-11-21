@@ -24,6 +24,7 @@ for round in $(seq 1 "$ROUNDS"); do
   python collect/police_fire.py   || echo "::warning::police/fire failed"            # TPS + TFS calls → incidents.json
   if [ $(( round % 6 )) -eq 1 ]; then python collect/roadwork.py || echo "::warning::roadwork failed"; fi   # City road restrictions, every 15 min
   python collect/run.py live      || echo "::warning::live feed failed"              # → gridlock_live.json
+  python collect/bulletin.py      || echo "::warning::bulletin failed"               # headlines, traffic, weather, voice clips → bulletin.json
   publish
   if [ "$round" -lt "$ROUNDS" ]; then wait=$(( GAP - ($(date +%s) - started) )); [ "$wait" -gt 0 ] && sleep "$wait"; fi
 done
