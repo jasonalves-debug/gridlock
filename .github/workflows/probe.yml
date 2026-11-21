@@ -1,0 +1,25 @@
+name: probe
+on: push
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/probe'
+    steps:
+      - run: |
+          for u in "https://toronto.citynews.ca/feed/" "https://toronto.citynews.ca/category/local-news/feed/" "https://www.cbc.ca/webfeed/rss/rss-canada-toronto" "https://globalnews.ca/toronto/feed/" "https://www.cp24.com/arc/outboundfeeds/rss/?outputType=xml" "https://www.cp24.com/rss/cp24-news" "https://www.thestar.com/search/?f=rss&t=article&c=news/gta*&l=50&s=start_time&sd=desc" "https://www.toronto.com/search/?f=rss&t=article&c=news/scarborough*&l=50&s=start_time&sd=desc" "https://feeds.feedburner.com/blogto" "https://www.ctvnews.ca/rss/ctvnews-ca-toronto-public-rss-1.822319"; do
+            code=$(curl -sL -A "Mozilla/5.0 GridlockBot" -o /tmp/f.xml -w "%{http_code} %{content_type}" "$u"); echo "=== $u -> $code $(wc -c </tmp/f.xml)"
+            grep -o "<title>[^<]*</title>\|<title><!\[CDATA\[[^]]*" /tmp/f.xml | head -6
+            grep -o "<pubDate>[^<]*</pubDate>" /tmp/f.xml | head -2
+          done
+      - run: |
+          pip install -q kokoro-onnx soundfile
+          curl -sSL -o k.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx
+          curl -sSL -o v.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+          nproc
+          python -c "
+          import time
+          from kokoro_onnx import Kokoro
+          k=Kokoro('k.onnx','v.bin')
+          for i in range(3):
+              t=time.time(); s,sr=k.create('Around three this morning, Toronto police were called to a break and enter at Lawrence Avenue East and Brimley Road.', voice='am_michael', speed=1.0, lang='en-us'); print(len(s)/sr, 'audio', time.time()-t, 'sec')
+          "
