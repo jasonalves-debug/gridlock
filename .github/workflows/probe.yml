@@ -6,11 +6,17 @@ jobs:
     if: github.ref == 'refs/heads/probe'
     steps:
       - run: |
-          for u in "https://toronto.citynews.ca/feed/" "https://toronto.citynews.ca/category/local-news/feed/" "https://www.cbc.ca/webfeed/rss/rss-canada-toronto" "https://globalnews.ca/toronto/feed/" "https://www.cp24.com/arc/outboundfeeds/rss/?outputType=xml" "https://www.cp24.com/rss/cp24-news" "https://www.thestar.com/search/?f=rss&t=article&c=news/gta*&l=50&s=start_time&sd=desc" "https://www.toronto.com/search/?f=rss&t=article&c=news/scarborough*&l=50&s=start_time&sd=desc" "https://feeds.feedburner.com/blogto" "https://www.ctvnews.ca/rss/ctvnews-ca-toronto-public-rss-1.822319" "https://toronto.citynews.ca/toronto-news/feed/" "https://www.cbc.ca/cmlink/rss-canada-toronto" "https://toronto.ctvnews.ca/rss/ctv-news-toronto-1.822319" "https://www.cp24.com/arc/outboundfeeds/rss/category/local/?outputType=xml" "https://globalnews.ca/feed/"; do
-            code=$(curl -sL -A "Mozilla/5.0 GridlockBot" -o /tmp/f.xml -w "%{http_code} %{content_type}" "$u"); echo "=== $u -> $code $(wc -c </tmp/f.xml)"
-            grep -o "<title>[^<]*</title>\|<title><!\[CDATA\[[^]]*" /tmp/f.xml | head -6 || true
-            grep -o "<pubDate>[^<]*</pubDate>" /tmp/f.xml | head -2 || true
-          done
+          cat > f.py <<'PY'
+          import urllib.request, re, sys
+          for u in sys.argv[1:]:
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (gridlock news bulletin)"}), timeout=20); b = r.read().decode("utf-8", "replace"); print("===", u, r.status, len(b))
+                  t = re.findall(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", b, re.S)[:7]; d = re.findall(r"<pubDate>(.*?)</pubDate>", b)[:2]
+                  for x in t: print("   T", x.strip()[:120])
+                  print("   D", d)
+              except Exception as e: print("===", u, "ERR", e)
+          PY
+          python3 f.py "https://toronto.citynews.ca/feed/" "https://toronto.citynews.ca/category/local-news/feed/" "https://www.cbc.ca/webfeed/rss/rss-canada-toronto" "https://globalnews.ca/toronto/feed/" "https://www.cp24.com/arc/outboundfeeds/rss/?outputType=xml" "https://www.cp24.com/rss/cp24-news" "https://www.thestar.com/search/?f=rss&t=article&c=news/gta*&l=50&s=start_time&sd=desc" "https://www.toronto.com/search/?f=rss&t=article&c=news/scarborough*&l=50&s=start_time&sd=desc" "https://feeds.feedburner.com/blogto" "https://www.ctvnews.ca/rss/ctvnews-ca-toronto-public-rss-1.822319" "https://toronto.citynews.ca/toronto-news/feed/" "https://www.cbc.ca/cmlink/rss-canada-toronto" "https://toronto.ctvnews.ca/rss/ctv-news-toronto-1.822319" "https://www.cp24.com/arc/outboundfeeds/rss/category/local/?outputType=xml" "https://globalnews.ca/feed/"
       - env:
           K: ${{ secrets.ONTARIO511_KEY }}
         run: |
