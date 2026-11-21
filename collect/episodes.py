@@ -139,7 +139,10 @@ def scripts(live, bul, pts):
                 d += [I("And the weather.", "wxintro"), I(wx, "weather")]
             d.append(I(f"I'm {B.DESK_NAME}.", "deskout"))
             segs.append({"who": "desk", "bed": "desk", "items": d})
-        segs.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report for {name}. Stay safe out there.", "outro")]})
+        wet = bool(re.search(r"rain|showers|drizzle|snow|flurr|squall|thunder", wx or "", re.I))
+        bye = (["Grab an umbrella on the way out.", "Watch your footing out there.", "Take it easy on the roads."] if wet else
+               ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet else 4)]
+        segs.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report for {name}. I'm {B.ANCHOR_NAME}. {bye}", "outro")]})
         out[f] = {"name": name, "segs": segs, "local": len(feat), "minor": max(0, minor)}
     return out
 

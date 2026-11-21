@@ -25,7 +25,7 @@ body.bul #hud, body.bul #tools, body.bul #ticker, body.bul #pulse, body.bul #now
 #bul .leader[hidden] { display: none; } #bul .leader .c { width: min(60vw, 300px); aspect-ratio: 1; border-radius: 50%; border: 6px solid #d8ccb0; position: relative; display: flex; align-items: center; justify-content: center; }
 #bul .leader .c::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(216,204,176,.35) var(--a, 0deg), rgba(0,0,0,0) 0); }
 #bul .leader .c b { font-size: min(34vw, 170px); color: #d8ccb0; position: relative; } #bul .leader .msg { position: absolute; bottom: 18%; font: 700 18px 'Special Elite', 'Courier New', monospace; color: #d8ccb0; letter-spacing: .1em; }
-#bul .lower { position: absolute; left: 14px; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); max-width: 760px; transform: translateY(30px); opacity: 0; transition: transform .45s cubic-bezier(.2,.9,.3,1.2), opacity .35s; }
+#bul .lower { position: absolute; left: 14px; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 112px); max-width: 760px; transform: translateY(30px); opacity: 0; transition: transform .45s cubic-bezier(.2,.9,.3,1.2), opacity .35s; }
 #bul .lower.show { transform: none; opacity: 1; }
 #bul .lower .k { display: inline-block; background: #b3261e; color: #fff; padding: 5px 10px; font: 800 14px system-ui, sans-serif; letter-spacing: .08em; }
 #bul .lower .t { background: #f4ead2; color: #1b2a4a; padding: 8px 12px 6px; font-size: clamp(22px, 5.4vw, 34px); line-height: 1.08; box-shadow: 0 4px 0 #1b2a4a; }
@@ -257,7 +257,7 @@ function bulCue(c) { // what the map does when the voice gets to each part
   const me = BUL.me && BUL.me.inside ? BUL.me : null, D = BUL.data || {}, cap = $('bulCap'), low = $('bulLow');
   const home = h => { camGoal = { x: me ? me.x : 0, y: me ? me.y : 0, h: me ? h : Math.max(h, 6000) }; };
   if (c.k !== 'call' && c.k !== 'news') { low.classList.remove('show'); BUL.marks = []; }
-  if (c.txt && c.k !== 'news') cap.textContent = c.txt; else if (c.k === 'news') cap.textContent = '';
+  cap.textContent = c.txt && c.k !== 'news' ? c.txt : '';
   switch (c.k) {
     case 'open': $('bulDate').textContent = new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase(); $('bulCard').classList.add('show'); BUL.ep.cardOff = c.t + c.d - 1.2; break;
     case 'intro': $('bulCard').classList.remove('show'); home(1500); break;

@@ -205,6 +205,17 @@ def spoken(t):
     return t[:1].upper() + t[1:]
 
 
+ALIAS = {"citynews toronto": "CityNews", "citynews": "CityNews", "cp24.com": "CP24", "cp24": "CP24", "cbc": "CBC Toronto", "cbc news": "CBC Toronto",
+         "cbc.ca": "CBC Toronto", "toronto star": "the Toronto Star", "thestar.com": "the Toronto Star", "global news": "Global News", "globalnews.ca": "Global News",
+         "ctv news toronto": "CTV News", "ctv news": "CTV News", "toronto sun": "the Toronto Sun", "blogto": "blogTO", "the globe and mail": "the Globe and Mail",
+         "narcity": "Narcity", "toronto.com": "Toronto.com", "680 news": "CityNews"}
+
+
+def outlet_name(s):
+    k = re.sub(r"^the ", "", (s or "").strip(), flags=re.I).lower()
+    return ALIAS.get(k, s.strip())
+
+
 def toks(t):
     return {w for w in re.findall(r"[a-z]{4,}", t.lower()) if w not in STOP}
 
@@ -222,7 +233,7 @@ def headlines(prev):
                     m = re.search(r"\s+-\s+([^-]{2,40})$", it["title"])
                     it["src"], it["gn"] = (m.group(1).strip() if m else "Google News"), k
             for it in got:
-                it["src"] = re.sub(r"^the ", "", it["src"], flags=re.I)
+                it["src"] = outlet_name(it["src"])
             items += got
             status[name] = len(got)
         except Exception as e:  # noqa: BLE001
