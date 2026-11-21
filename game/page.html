@@ -391,7 +391,7 @@ body.tv #tvExit { top: 8px; }
     <div class="loading busy" id="loading"><span id="loadTxt">Loading Scarborough…</span><div class="bar"><i id="loadBar"></i></div></div>
   </div>
 </div>
-<script>/* the title screen is a loading screen from the first paint; only #menu and #tv show the mode cards */ (function () { var h = location.hash; if (h === '#menu' || h === '#tv') { var s = document.getElementById('start'), l = document.getElementById('loading'); s.classList.remove('auto'); l.hidden = true; l.classList.remove('busy'); } })();</script>
+<script>/* the title screen is a loading screen from the first paint; only #menu and #tv show the mode cards */ (function () { var h = location.hash; if (h === '#menu' || h === '#tv' || h === '#news') { var s = document.getElementById('start'), l = document.getElementById('loading'); s.classList.remove('auto'); l.hidden = true; l.classList.remove('busy'); } })();</script>
 
 <div class="screen" id="report" hidden>
   <div class="panel" id="repPanel"></div>

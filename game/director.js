@@ -52,6 +52,7 @@ const DIR = (function () {
   const has = k => !!VOICE.clips[k];
   const voDur = keys => keys.reduce((s, k) => s + ((VOICE.dur && VOICE.dur[k]) || 0.8) + 0.05, 0);
   function say(chain, keys, pri, src) {
+    if (BUL.on) return; // the Near me report has the floor
     pri = pri == null ? 1 : pri; const sig = chain + keys.join('|'), nowS = performance.now(); if (pri < 3 && chain !== 'chatter' && nowS - (lastSaid.get(sig) || -1e9) < 75000) return; lastSaid.set(sig, nowS); // the same line is never repeated within 75 s
     keys = keys.filter(k => k && (VOICE.clips[k] || k.startsWith('r:') === false)).map(pickVar); if (!keys.length) return;
     if (speechQ.length > 5) { const i = speechQ.findIndex(q => q.pri < pri); if (i >= 0) speechQ.splice(i, 1); else return; }
