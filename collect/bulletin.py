@@ -161,11 +161,16 @@ SPORT = re.compile(r"raptors|leafs|blue jays|\bjays\b|argos|\btfc\b|nhl|nba|mlb|
 def fetch_feed(name, url):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (GRIDLOCK news bulletin; github.com/jasonalves-debug/gridlock)"})
-    body = urllib.request.urlopen(req, timeout=20).read()
-    root = ET.fromstring(body)
+    body = urllib.request.urlopen(req, timeout=35).read()
+    try:
+        raw = [(it.findtext("title"), it.findtext("pubDate"), it.findtext("link")) for it in ET.fromstring(body).iter("item")]
+    except ET.ParseError:  # some feeds aren't strict XML: fall back to pulling the fields out by hand
+        txt = body.decode("utf-8", "replace")
+        g = lambda tag, blk: (re.search(rf"<{tag}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{tag}>", blk, re.S) or [None, None])[1]
+        raw = [(g("title", b), g("pubDate", b), g("link", b)) for b in re.findall(r"<item\b.*?</item>", txt, re.S)]
     out = []
-    for it in root.iter("item"):
-        t, d, link = clean(it.findtext("title")), it.findtext("pubDate"), (it.findtext("link") or "").strip()
+    for t, d, link in raw:
+        t, link = clean(t), (link or "").strip()
         try:
             ts = parsedate_to_datetime(d).timestamp() if d else None
         except Exception:  # noqa: BLE001
@@ -205,7 +210,13 @@ def headlines(prev):
                   sport=bool(SPORT.search(t)), score=round(sc, 2))
         keep.append(it)
     keep.sort(key=lambda x: -x["score"])
-    return {"fetched": int(now), "status": status, "items": keep[:10]}
+    per, final = {}, []
+    for it in keep:
+        if per.get(it["src"], 0) >= 3:
+            continue
+        per[it["src"]] = per.get(it["src"], 0) + 1
+        final.append(it)
+    return {"fetched": int(now), "status": status, "items": final[:10]}
 
 
 def news_line(it, k):
@@ -277,12 +288,20 @@ def traffic(live):
             if not where:
                 continue
             dirn = (v.get("dir") or "").lower()
+            desc = v.get("desc") or ""
+            ramp = re.search(r"(On|Off)-ramp (?:at|from|to) (.+?)(?:,|\.|$)", desc, re.I)
+            lanes_of = " express lanes" if re.search(r"express", desc, re.I) else " collectors" if re.search(r"collector", desc, re.I) else ""
+            if ramp:
+                lines.append(f"The 401 {dirn} {ramp.group(1).lower()}-ramp at {street(ramp.group(2).title())} is {'closed' if v.get('full') else 'down to one lane'}.")
+                if len(lines) >= 3:
+                    break
+                continue
             if v.get("type") in ("accidentsAndIncidents", "incident", "accident") or "collision" in (v.get("desc") or "").lower():
                 lines.append(f"There's a collision on the 401 {dirn}{where}.")
             elif v.get("full"):
-                lines.append(f"The 401 {dirn} is closed{where}.")
+                lines.append(f"The 401 {dirn}{lanes_of} {'are' if lanes_of.endswith('s') else 'is'} closed{where}.")
             elif v.get("lanes"):
-                lines.append(f"Lane closures on the 401 {dirn}{where}.")
+                lines.append(f"Lane closures on the 401 {dirn}{lanes_of}{where}.")
             if len(lines) >= 3:
                 break
         if not lines:
@@ -337,6 +356,8 @@ def static_phrases():
         "near": "Here's what happened within a kilometre of you, over the last day.",
         "near_quiet": "First, your street. It's been quiet. Nothing serious reported within a kilometre of you in the last day.",
         "near_out": "You're outside our coverage area, so here's the picture across Scarborough.",
+        "no_loc": "We couldn't find your location, so here's the picture across Scarborough.",
+        "top": "Here are the top calls across Scarborough in the last day.",
         "wider": "Elsewhere in Scarborough,", "wider2": "And across Scarborough,",
         "news_morning": "In the news this morning.", "news_afternoon": "In the news this afternoon.", "news_evening": "In the news tonight.",
         "toss": f"Now, traffic and weather together. Here's {DESK_NAME.split()[0]}.",
