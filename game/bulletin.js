@@ -81,7 +81,7 @@ function bulAudio() {
   N.out = AC.createGain(); N.out.gain.value = 1; const glue = AC.createDynamicsCompressor(); glue.threshold.value = -16; glue.ratio.value = 3; glue.attack.value = 0.01; glue.release.value = 0.25; N.out.connect(glue); glue.connect(master);
   const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 170; const pk = AC.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 2400; pk.gain.value = 4; pk.Q.value = 0.9;
   const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200; const sh = AC.createWaveShaper(); const cv = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; cv[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); } sh.curve = cv;
-  N.voice = AC.createGain(); N.voice.gain.value = 1.05; hp.connect(pk); pk.connect(lp); lp.connect(sh); sh.connect(N.voice); N.voice.connect(N.out); N.vin = hp;
+  N.voice = AC.createGain(); N.voice.gain.value = 0.8; hp.connect(pk); pk.connect(lp); lp.connect(sh); sh.connect(N.voice); N.voice.connect(N.out); N.vin = hp;
   N.wow = AC.createOscillator(); N.wow.frequency.value = 0.55; N.wowG = AC.createGain(); N.wowG.gain.value = 5; N.wow.connect(N.wowG); N.wow.start();
   N.mus = AC.createGain(); N.mus.gain.value = 0.55; const mlp = AC.createBiquadFilter(); mlp.type = 'lowpass'; mlp.frequency.value = 6500; N.mus.connect(mlp); mlp.connect(N.out);
   N.bed = AC.createGain(); N.bed.gain.value = 0; N.bed.connect(N.mus);
@@ -158,17 +158,17 @@ function bulDedupe(L) { const out = []; for (const o of L) { if (out.some(k => M
 const BUL_SEV = { critical: 4, high: 3, medium: 2, low: 1 };
 function bulScore(o) { const c = o.c; return (BUL_SEV[c.sev] || 1) + (c.act === 'crash2' || c.act === 'crash3' || c.act === 'fire_struct' || c.act === 'gas' ? 0.6 : 0) - o.age / 86400 * 0.8; }
 function bulMinor(c) { return c.act === 'medical' || c.act === 'fire_alarm'; }
-function bulBuild(me) {
+function bulBuild(me, sharedTail) { // your own 1 km opening; then either the collector's produced back half (sharedTail) or the stitched one
   const D = BUL.data || {}, hr = new Date().getHours(), seq = [], calls = h24calls().filter(o => (BUL_SEV[o.c.sev] || 0) > 0);
   const greet = hr >= 5 && hr < 12 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : hr >= 17 && hr < 22 ? 'evening' : 'night';
   const meXY = me && me.inside ? me : null, far = o => !meXY || Math.hypot(o.x - meXY.x, o.y - meXY.y) > (/\(approx|^M1/i.test(o.c.loc || '') ? 1500 : BUL_R);
   seq.push({ k: 'card' }, { k: 'jingle', j: 'open' }, { k: 'cardOff' });
-  seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 1500 : 9000, slow: true }, { k: 'say', key: 's:greet_' + greet }, { k: 'say', key: 's:intro' });
+  seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 1500 : 9000, slow: true }, ...(D.clips && D.clips['s:intro_' + greet] ? [{ k: 'say', key: 's:intro_' + greet }] : [{ k: 'say', key: 's:greet_' + greet }, { k: 'say', key: 's:intro' }]));
   let near = [], feat = [];
   if (meXY) { near = calls.filter(o => !far(o)); feat = bulDedupe(near.filter(o => !bulMinor(o.c)).sort((a, b) => bulScore(b) - bulScore(a))).slice(0, 4).sort((a, b) => a.c.ts - b.c.ts); }
   const callItem = (o, lab) => { const c = o.c, dist = meXY ? Math.round(Math.hypot(o.x - meXY.x, o.y - meXY.y) / 10) * 10 : 0;
-    seq.push({ k: 'jingle', j: 'cue' }, { k: 'cam', x: o.x, y: o.y, h: 420, mark: o }, { k: 'low', kick: `${c.src === 'tps' ? 'TORONTO POLICE' : 'TORONTO FIRE'} · ${bulHM(c.ts)}`, title: (c.label || '').toUpperCase(), sub: bulPlace(c) + (dist ? ` · ${dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m'} from you` : '') },
-      { k: 'say', key: bulKeyTime(c.ts) }, { k: 'say', key: 'c:' + c.id, text: bulLine(c) }, { k: 'lowOff' }); };
+    seq.push({ k: 'cam', x: o.x, y: o.y, h: 420, mark: o, slow: true }, { k: 'low', kick: `${c.src === 'tps' ? 'TORONTO POLICE' : 'TORONTO FIRE'} · ${bulHM(c.ts)}`, title: (c.label || '').toUpperCase(), sub: bulPlace(c) + (dist ? ` · ${dist >= 1000 ? (dist / 1000).toFixed(1) + ' km' : dist + ' m'} from you` : '') },
+      ...(bulTimed(c) ? [] : [{ k: 'say', key: bulKeyTime(c.ts) }]), { k: 'say', key: 'c:' + c.id, text: bulLine(c) }, { k: 'lowOff' }); };
   if (!me) seq.push({ k: 'say', key: 's:no_loc' }); else if (!me.inside) seq.push({ k: 'say', key: 's:near_out' });
   else { seq.push({ k: 'ring', on: true }, { k: 'say', key: feat.length ? 's:near' : 's:near_quiet' }); }
   if (feat.length) { seq.push({ k: 'ring', on: false }, { k: 'bed', b: 'wire' }); feat.forEach(o => callItem(o)); }
@@ -176,6 +176,7 @@ function bulBuild(me) {
   const wide = calls.filter(o => far(o) && (o.c.sev === 'critical' || o.c.sev === 'high' || o.c.act === 'fire_struct' || o.c.act === 'gas' || o.c.act === 'crash3')).sort((a, b) => bulScore(b) - bulScore(a)); const wideP = bulDedupe(wide.filter(o => !feat.includes(o))).slice(0, feat.length >= 3 ? 1 : feat.length ? 2 : 3).sort((a, b) => a.c.ts - b.c.ts);
   if (wideP.length) { seq.push({ k: 'ring', on: false }, { k: 'bed', b: 'wire' }, { k: 'say', key: feat.length ? 's:wider' : (me && me.inside ? 's:wider2' : 's:top') }); wideP.forEach(o => callItem(o)); }
   seq.push({ k: 'bed', b: null }, { k: 'ring', on: false });
+  if (sharedTail) { seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 2600 : 9000, slow: true }, { k: 'shared' }); return seq; }
   const pick = ((D.news && D.news.items) || []).slice(0, 3); // already ranked by the collector: the stories the most outlets carry
   if (pick.length) { seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 2600 : 9000, slow: true }, { k: 'jingle', j: 'bump' }, { k: 'bed', b: 'news' }, { k: 'say', key: 's:news_' + (hr < 12 && hr >= 4 ? 'morning' : hr < 17 && hr >= 12 ? 'afternoon' : 'evening') });
     pick.forEach(it => seq.push({ k: 'low', kick: it.src.replace(/^the /, '').toUpperCase() + ' · ' + bulHM(it.ts), title: it.title, sub: '' }, { k: 'say', key: 'n:' + it.id, nocap: true }, { k: 'lowOff' }));
@@ -187,6 +188,7 @@ function bulBuild(me) {
   seq.push({ k: 'cam', x: meXY ? meXY.x : 0, y: meXY ? meXY.y : 0, h: meXY ? 900 : 6000, slow: true }, { k: 'say', key: 's:signoff' }, { k: 'jingle', j: 'close' });
   return seq;
 }
+function bulTimed(c) { const k = BUL.data && BUL.data.clips && BUL.data.clips['c:' + c.id]; return !!(k && k.f && /^(Within|Around|Overnight|Early|Yesterday|Last night)/.test(k.t || '')); } // the clip already says when
 function bulHwyView(me) { // a stretch of the 401 near the listener
   let best = null, bd = 1e18; const ex = me ? me.x : 0, ey = me ? me.y : 0;
   for (let e = 0; e < G.cls.length; e += 3) { if (G.cls[e] !== 0) continue; const a = G.ea ? G.ea[e] : -1; if (a < 0) continue; const x = G.nx[a], y = G.ny[a], d = (x - ex) ** 2 + (y - ey) ** 2; if (d < bd) { bd = d; best = { x, y }; } }
@@ -218,7 +220,8 @@ async function bulRun() {
     else if (s.k === 'lowOff') { $('bulLow').classList.remove('show'); await bulWait(250); }
     else if (s.k === 'board') bulBoard(s.kind);
     else if (s.k === 'boardOff') $('bulBoard').classList.remove('show');
-    else if (s.k === 'say') { await bulSay(s.key, s.text, s.nocap); await bulWait(220); }
+    else if (s.k === 'say') { await bulSay(s.key, s.text, s.nocap); await bulWait(320); }
+    else if (s.k === 'shared' && BUL.sharedBuf) { await bulPlayShared(); break; }
   }
   bulEnd();
 }
@@ -230,28 +233,23 @@ async function bulStart() {
   const [data, geo] = await Promise.all([Promise.race([BUL.dataP, bulWait(9000).then(() => null)]), Promise.race([BUL.geoP, bulWait(10000).then(() => null)])]);
   BUL.data = data || { clips: {}, lines: {} };
   if (geo) { const P = G.proj, x = (geo.lng - P.lon0) * P.kx, y = -(geo.lat - P.lat0) * P.ky; BUL.me = { x, y, lat: geo.lat, lng: geo.lng, inside: inMap(x, y) }; } else BUL.me = null;
-  // the produced episode for the listener's postal area: one finished mix, with a cue sheet the map follows
-  const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]);
-  const fsa = eps && geo ? bulFsa(eps, geo.lat, geo.lng) : null, ep = fsa && eps.fsa && eps.fsa[fsa];
-  if (ep && ep.file && ep.cues) {
-    $('bulMsg').textContent = 'TUNING IN TO ' + (ep.name || fsa).toUpperCase() + '…';
-    const buf = await Promise.race([fetch(FEED_BASE + ep.file).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(b => new Promise((res, rej) => AC.decodeAudioData(b, res, rej))).catch(() => null), bulWait(15000).then(() => null)]);
-    if (buf && !BUL.stop) { clearInterval(tick); clearInterval(sweep); lead.hidden = true; if (N) N.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.2); bulPlayEpisode(ep, fsa, buf); return; }
-  }
-  BUL.seq = bulBuild(BUL.me);
+  // the produced back half (headlines, traffic, weather, sign-off) everyone shares; your 1 km opening is put together here
+  const eps = await Promise.race([BUL.epP, bulWait(6000).then(() => null)]), sh = eps && eps.shared;
+  BUL.sharedBuf = null; BUL.shared = sh && sh.file && sh.cues ? sh : null;
+  const sharedP = BUL.shared ? fetch(FEED_BASE + sh.file).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(b => new Promise((res, rej) => AC.decodeAudioData(b, res, rej))).catch(() => null) : Promise.resolve(null);
   $('bulMsg').textContent = 'WARMING UP THE TUBES…';
+  BUL.sharedBuf = await Promise.race([sharedP, bulWait(12000).then(() => null)]);
+  BUL.seq = bulBuild(BUL.me, !!BUL.sharedBuf);
   const keys = BUL.seq.filter(s => s.k === 'say').map(s => s.key); await Promise.race([Promise.all(keys.slice(0, 14).map(bulLoad)), bulWait(6000)]); keys.forEach(bulLoad);
   clearInterval(tick); clearInterval(sweep); lead.hidden = true;
   if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); }
   BUL.t0 = performance.now(); bulRun();
 }
-function bulFsa(eps, lat, lng) { let best = null, bd = 1e9; for (const [f, P] of Object.entries(eps.points || {})) for (const [a, b] of P) { const d = (a - lat) ** 2 + ((b - lng) * 0.72) ** 2; if (d < bd) { bd = d; best = f; } } return bd < 0.0009 ? best : null; }
-function bulPlayEpisode(ep, fsa, buf) {
-  const N = bulAudio(), src = AC.createBufferSource(); src.buffer = buf; src.connect(N.out); BUL.srcs.add(src);
-  src.onended = () => { BUL.srcs.delete(src); bulEnd(); };
-  const t0 = AC.currentTime + 0.15; src.start(t0);
-  BUL.ep = { ep, fsa, t0, i: 0, cues: ep.cues.slice().sort((a, b) => a.t - b.t), cardOff: 0, lowOff: 0 };
-  if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); BUL.ring = BUL.me; }
+function bulPlayShared() { // plays the produced back half; its cue sheet drives the map
+  return new Promise(res => { const N = bulAudio(), src = AC.createBufferSource(); src.buffer = BUL.sharedBuf; src.connect(N.out); BUL.srcs.add(src);
+    if (N.hiss) N.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.3); // the produced mix has its own
+    src.onended = () => { BUL.srcs.delete(src); res(); }; const t0 = AC.currentTime + 0.05; src.start(t0);
+    BUL.ep = { t0, i: 0, cues: BUL.shared.cues.slice().sort((a, b) => a.t - b.t), cardOff: 0 }; });
 }
 function bulCue(c) { // what the map does when the voice gets to each part
   const me = BUL.me && BUL.me.inside ? BUL.me : null, D = BUL.data || {}, cap = $('bulCap'), low = $('bulLow');

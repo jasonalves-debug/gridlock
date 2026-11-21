@@ -29,31 +29,7 @@ BUDGET = float(os.environ.get("EPISODE_BUDGET", "80"))
 RAW = "https://raw.githubusercontent.com/jasonalves-debug/gridlock/data/"
 PAGE = "https://jasonalves-debug.github.io/gallery/gridlock-report.html"
 COVER = "https://jasonalves-debug.github.io/gallery/gridlock-report-cover.png"
-ORD = {1: "first", 2: "second", 3: "third", 5: "fifth", 8: "eighth", 9: "ninth", 12: "twelfth", 20: "twentieth", 30: "thirtieth"}
-
-
-def ordinal(n):
-    if n in ORD:
-        return ORD[n]
-    if n > 20 and n % 10:
-        return B.TENS[n // 10] + "-" + ordinal(n % 10)
-    return B.words(n) + "th"
-
-
-def when(ts, now):
-    if now.timestamp() - ts < 3600:
-        return "Within the last hour"
-    d = datetime.fromtimestamp(ts, TORONTO)
-    h, hw = d.hour, B.hour_words(d.hour)
-    if d.date() == now.date():
-        return (f"Overnight, around {hw}" if h < 5 else f"Around {hw} this morning" if h < 12 else "Around noon" if h == 12 else
-                f"Around {hw} this afternoon" if h < 17 else f"Around {hw} this evening" if h < 21 else f"Around {hw} tonight")
-    return (f"Early yesterday, around {hw}" if h < 5 else f"Yesterday morning, around {hw}" if h < 12 else "Yesterday around noon" if h == 12 else
-            f"Yesterday afternoon, around {hw}" if h < 17 else f"Yesterday evening, around {hw}" if h < 21 else f"Last night, around {hw}")
-
-
-def lower_first(s):
-    return s if s.startswith("Toronto") else s[:1].lower() + s[1:]
+ordinal, when, lower_first = B.ordinal, B.when, B.lower_first
 
 
 SEV = {"critical": 4, "high": 3, "medium": 2, "low": 1}
@@ -101,8 +77,24 @@ def scripts(live, bul, pts):
     news = ((bul.get("news") or {}).get("items") or [])[:3]
     tr, wx = (bul.get("traffic") or {}).get("text"), (bul.get("weather") or {}).get("text")
     A1, D1 = B.ANCHOR_NAME.split()[0], B.DESK_NAME.split()[0]
-    serious = sorted([c for c in calls if c.get("sev") in ("critical", "high") or c.get("act") in ("fire_struct", "gas", "crash3")], key=lambda c: -score(c, nts))
     I = lambda t, k, ref=None: {"t": t, "k": k, "ref": ref}
+    out_shared = None
+    if news or tr or wx:
+        sh = []
+        if news:
+            n = [I(f"In Toronto news {part}.", "newsintro")] + [I(B.news_line(x, k), "news", x["id"]) for k, x in enumerate(news)]
+            if tr or wx:
+                n.append(I(f"Now, traffic and weather together. Here's {D1}.", "toss"))
+            sh.append({"who": "anchor", "bed": "news", "items": n})
+        if tr or wx:
+            d = [I(f"Thanks, {A1}.", "deskhi")] + ([I(tr, "traffic")] if tr else []) + ([I("And the weather.", "wxintro"), I(wx, "weather")] if wx else []) + [I(f"I'm {B.DESK_NAME}.", "deskout")]
+            sh.append({"who": "desk", "bed": "desk", "items": d})
+        wet0 = bool(re.search(r"rain|showers|drizzle|snow|flurr|squall|thunder", wx or "", re.I))
+        bye0 = (["Grab an umbrella on the way out.", "Watch your footing out there.", "Take it easy on the roads."] if wet0 else
+                ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet0 else 4)]
+        sh.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report. I'm {B.ANCHOR_NAME}. {bye0}", "outro")]})
+        out_shared = {"segs": sh}
+    serious = sorted([c for c in calls if c.get("sev") in ("critical", "high") or c.get("act") in ("fire_struct", "gas", "crash3")], key=lambda c: -score(c, nts))
     call_item = lambda c: I(f"{when(c['ts'], now)}, {lower_first(B.call_line(c))}", "call", c["id"])
     out = {}
     for f, name in B.FSA_NAMES.items():
@@ -144,6 +136,7 @@ def scripts(live, bul, pts):
                ["Stay safe out there.", "Have a good one, Scarborough.", "Drive carefully, and we'll talk soon.", "Take care of each other."])[(now.timetuple().tm_yday + hr // 6) % (3 if wet else 4)]
         segs.append({"who": "anchor", "bed": None, "items": [I((f"Thanks, {D1}. " if tr or wx else "") + f"And that's the Gridlock Report for {name}. I'm {B.ANCHOR_NAME}. {bye}", "outro")]})
         out[f] = {"name": name, "segs": segs, "local": len(feat), "minor": max(0, minor)}
+    out["_shared"] = out_shared
     return out
 
 
@@ -331,19 +324,20 @@ def am_voice(m, x):
     return (y * (0.16 / rms)).astype(np.float32)
 
 
-def render(ep):
-    """The finished episode as MP3 bytes, its length, and a cue sheet: when each jingle and each spoken item starts."""
+def render(ep, head="open"):
+    """The finished episode as MP3 bytes, its length, and a cue sheet: when each jingle and each spoken item starts.
+    head="bump" makes the shared back half the map plays after its own 1 km opening."""
     import lameenc
     m = Mix(30)
     np = m.np
     cues = []
     gap = int(0.32 * SR)
-    t = jingle(m, "open", 0.05)
-    cues.append({"t": 0.05, "d": round(t, 2), "k": "open"})
-    t -= 0.9
+    t = jingle(m, head, 0.05)
+    cues.append({"t": 0.05, "d": round(t, 2), "k": head})
+    t -= 0.9 if head == "open" else 0.25
     segs = ep["segs"]
     for k, sg in enumerate(segs):
-        if k == 1:
+        if k >= 1 and sg["bed"] == "news":
             d = jingle(m, "bump", t + 0.35)
             cues.append({"t": round(t + 0.35, 2), "d": d, "k": "bump"})
             t += d + 0.05
@@ -421,6 +415,18 @@ def build():
     os.makedirs(EP_DIR, exist_ok=True)
     os.makedirs(POD_DIR, exist_ok=True)
     eps = scripts(live, bul, pts)
+    shared_ep = eps.pop("_shared", None)
+    shared = prev.get("shared") or {}
+    if shared_ep:  # the back half every map listener hears after their own 1 km opening
+        skey = hashlib.sha1((B.ANCHOR + B.DESK + json.dumps(shared_ep["segs"])).encode()).hexdigest()[:12]
+        if skey != shared.get("key") or not shared.get("file") or not os.path.exists(path(shared["file"])):
+            try:
+                data, dur, cues = render(shared_ep, head="bump")
+                rel = f"episodes/shared-{datetime.now(TORONTO).strftime('%Y%m%d-%H%M%S')}.mp3"
+                open(path(rel), "wb").write(data)
+                shared = {"file": rel, "dur": dur, "cues": cues, "at": int(time.time()), "key": skey, "prev": shared.get("file")}
+            except Exception as e:  # noqa: BLE001
+                print("shared episode failed:", e)
     pf = prev.get("fsa") or {}
     order = sorted(eps, key=lambda f: (pf.get(f) or {}).get("at", 0))  # stalest first
     made, out = 0, {}
@@ -451,10 +457,11 @@ def build():
         out[f] = entry
         open(os.path.join(POD_DIR, f + ".xml"), "w").write(podcast(f, ep["name"], list(reversed(entry["hist"]))))
     keep = {h["file"].split("/")[-1] for e in out.values() for h in (e.get("hist") or [])} | {e["file"].split("/")[-1] for e in out.values() if e.get("file")}
+    keep |= {x.split("/")[-1] for x in (shared.get("file"), shared.get("prev")) if x}
     for fn in os.listdir(EP_DIR):
         if fn.endswith(".mp3") and fn not in keep:
             os.remove(os.path.join(EP_DIR, fn))
-    save(OUT, {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "fsa": out, "names": B.FSA_NAMES, "points": pts})
+    save(OUT, {"generated": datetime.now(TORONTO).isoformat(timespec="seconds"), "shared": shared, "fsa": out, "names": B.FSA_NAMES, "points": pts})
     print(f"episodes: {made} rendered, {sum(1 for e in out.values() if e.get('file'))}/{len(out)} areas ready, {time.time() - t0:.0f}s")
 
 

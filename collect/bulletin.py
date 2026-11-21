@@ -104,6 +104,33 @@ def place(c):
     return f"on {parts[0]}"
 
 
+def when(ts, now):
+    if now.timestamp() - ts < 3600:
+        return "Within the last hour"
+    d = datetime.fromtimestamp(ts, TORONTO)
+    h, hw = d.hour, hour_words(d.hour)
+    if d.date() == now.date():
+        return (f"Overnight, around {hw}" if h < 5 else f"Around {hw} this morning" if h < 12 else "Around noon" if h == 12 else
+                f"Around {hw} this afternoon" if h < 17 else f"Around {hw} this evening" if h < 21 else f"Around {hw} tonight")
+    return (f"Early yesterday, around {hw}" if h < 5 else f"Yesterday morning, around {hw}" if h < 12 else "Yesterday around noon" if h == 12 else
+            f"Yesterday afternoon, around {hw}" if h < 17 else f"Yesterday evening, around {hw}" if h < 21 else f"Last night, around {hw}")
+
+
+def lower_first(s):
+    return s if s.startswith("Toronto") else s[:1].lower() + s[1:]
+
+
+ORD = {1: "first", 2: "second", 3: "third", 5: "fifth", 8: "eighth", 9: "ninth", 12: "twelfth", 20: "twentieth", 30: "thirtieth"}
+
+
+def ordinal(n):
+    if n in ORD:
+        return ORD[n]
+    if n > 20 and n % 10:
+        return TENS[n // 10] + "-" + ordinal(n % 10)
+    return words(n) + "th"
+
+
 def an(x):
     return ("an " if x[:1].lower() in "aeiou" else "a ") + x
 
@@ -490,7 +517,10 @@ def synth(text, voice, speed=1.0):
     nz = np.flatnonzero(np.abs(s) > 0.01)  # trim the silence Kokoro leaves at both ends
     if nz.size:
         s = s[max(0, nz[0] - int(0.03 * sr)): nz[-1] + int(0.12 * sr)]
-    s = s / max(1e-3, float(np.max(np.abs(s)))) * 0.92
+    s = s * (0.16 / max(1e-4, float(np.sqrt(np.mean(s ** 2)))))  # same speech level as the produced episodes
+    pk = float(np.max(np.abs(s)))
+    if pk > 0.97:
+        s = np.tanh(s / pk * 1.4) / np.tanh(1.4) * 0.97
     enc = lameenc.Encoder()
     enc.set_bit_rate(48)
     enc.set_in_sample_rate(sr)
@@ -501,7 +531,7 @@ def synth(text, voice, speed=1.0):
 
 
 def fname(text, voice):
-    return hashlib.sha1(f"{voice}|1.0|{text}".encode()).hexdigest()[:14] + ".mp3"
+    return hashlib.sha1(f"{voice}|1.0|rms|{text}".encode()).hexdigest()[:14] + ".mp3"
 
 
 def build():
@@ -542,13 +572,17 @@ def build():
     for k, it in enumerate(news.get("items", [])):
         want.append(("n:" + it["id"], news_line(it, k), ANCHOR))
     now = time.time()
+    nowdt = datetime.now(TORONTO)
     calls = sorted([c for c in live.get("calls") or [] if now - c.get("ts", 0) < 26 * 3600], key=lambda c: -c["ts"])
     lines = {}
     for c in calls:
         ln = call_line(c)
         if ln:
             lines[c["id"]] = ln
-            want.append(("c:" + c["id"], ln, ANCHOR))
+            want.append(("c:" + c["id"], f"{when(c['ts'], nowdt)}, {lower_first(ln)}", ANCHOR))
+    date = f"{nowdt.strftime('%A')}, {nowdt.strftime('%B')} {ordinal(nowdt.day)}"
+    for g, gt in (("morning", "Good morning, Scarborough"), ("afternoon", "Good afternoon, Scarborough"), ("evening", "Good evening, Scarborough"), ("night", "You're up late, Scarborough")):
+        want.append(("s:intro_" + g, f"{gt}. This is the Gridlock Report, {date}. I'm {ANCHOR_NAME}.", ANCHOR))
     for k, txt in static_phrases().items():
         want.append(("s:" + k, txt, DESK if k.startswith("desk_") else ANCHOR))
 
