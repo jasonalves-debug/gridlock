@@ -149,7 +149,7 @@ function cmd(fn, ...args) { return new Promise(res => { const id = reqSeq++; pen
 function onWorker(m) {
   const d = m.data;
   if (d.type === 'progress') { $('loading').classList.remove('busy'); $('loadBar').style.width = Math.round(d.p * 100) + '%'; $('loadTxt').textContent = `Morning traffic is building… ${Math.round(d.p * 100)}%`; }
-  else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; $('tvBtn').hidden = !LV.kind; $('newsBtn').hidden = !LV.kind; if (BUL.want) { BUL.want = false; setTimeout(bulStart, 500); } if (LV.tvNext) { LV.tvNext = false; setTimeout(() => tvSet(true, false), 300); } if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; $('start').hidden = true; $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
+  else if (d.type === 'ready') { ready = true; setTimeout(liveAfterReady, 400); $('skipBtn').hidden = LV.kind !== 'replay'; $('h24Btn').hidden = !LV.kind; $('areaBtn').hidden = !LV.kind; $('tvBtn').hidden = !LV.kind; $('newsBtn').hidden = !LV.kind; if (BUL.want) { BUL.want = false; LV.pick = 'report'; setTimeout(bulStart, 500); } if (LV.tvNext) { LV.tvNext = false; setTimeout(() => tvSet(true, false), 300); } if (LV.kind === 'replay') h24Set(true); simT = d.t; summary = d.summary; if (LV.hold && !LV.pick) launchHold(); else launchRelease(); $('hud').hidden = false; $('tools').hidden = false; buildHud(); layout(); setSpeed(mode === 'shift' ? 10 : LV.kind === 'live' ? 1 : LV.kind === 'replay' ? 10 : 4); if (mode === 'watch') DIR.auto = true; updateLiveUI(); requestFrame(); if (!LV.kind) toast('OPS', mode === 'shift' ? 'Shift started. Tap anything on the map to inspect it.' : mode === 'watch' ? 'The city runs itself. Touch the map to take over.' : 'Sandbox. Tap the crash icon (bottom right) to cause trouble.', 'var(--amber)'); }
   else if (d.type === 'frame') {
     frameWaiting = false; spareBuf = posBuf; posBuf = d.buf; frameN = d.n; simT = d.t; rainOn = d.rain; snowOn = d.snow; fogOn = d.fog; stormOn = d.storm; onWorld(d);
     if (d.spd) { R.setSpeeds(d.spd, d.cut); R.setSignals(d.sig); summary = d.summary; incidents = d.incidents; units = d.units; pool = d.summary.pool; updateHud(); updateFeed(); refreshSheet(); try { DIR.onSlow(); } catch (err) { console.error(err); } chSlow(d.pursuit); }
@@ -217,7 +217,7 @@ function buildHud() {
   $('speedBtn').onclick = () => { setSpeed(speeds[(speeds.indexOf(lastSpeed) + 1) % speeds.length]); snd('ui'); };
   $('statBtn').onclick = () => togglePanel('chips', 'statBtn'); $('incBtn').onclick = () => togglePanel('feed', 'incBtn');
   $('progWrap').hidden = mode !== 'shift';
-  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn):not(#h24Btn):not(#areaBtn):not(#tvBtn)').forEach(b => b.remove());
+  const tr = $('toolRow'); tr.querySelectorAll('.tool:not(#camBtn):not(#muteBtn):not(#h24Btn):not(#areaBtn):not(#tvBtn):not(#newsBtn)').forEach(b => b.remove());
   const tools = [['traffic', 'Traffic colours'], ['tilt', '3D view'], ['sign', 'Warning sign'], ['local', 'Local traffic only'], ['inspect', 'Inspect']];
   if (mode === 'whatif') tools.splice(4, 0, ['cause', 'Cause trouble']);
   tools.forEach(([k, l], i) => { const b = document.createElement('button'); b.className = 'tool' + (i === 0 || i === 2 ? ' sep' : ''); b.type = 'button'; b.id = 'tool-' + k; b.title = l; b.setAttribute('aria-label', l); b.innerHTML = svg(k === 'cause' ? 'crash' : k); b.onclick = () => onTool(k); tr.appendChild(b); });
@@ -647,6 +647,8 @@ function endShift() {
 /*__DIRECTOR__*/
 /*__LIVEAPP__*/
 // ---------------------------------------------------------------- start
+function launchHold() { $('start').hidden = false; $('loading').classList.remove('busy'); $('loadTxt').textContent = '✓ Ready. Pick one.'; document.body.classList.add('launchReady'); const g = $('goTake'); if (g) { g.disabled = false; g.textContent = 'Take command'; } }
+function launchRelease() { LV.hold = false; document.body.classList.remove('launchReady'); $('start').hidden = true; }
 async function begin(m) {
   audioInit(); const kind = m === 'live' || m === 'replay' ? m : null; if (kind) m = 'watch'; mode = m; LV.kind = kind; $('loading').hidden = false; $('loading').classList.add('busy'); $('loadTxt').textContent = 'Loading Scarborough…'; document.querySelectorAll('.mode').forEach(b => b.disabled = true);
   if (LV.loading) { $('loadTxt').textContent = 'Pulling live Toronto data…'; try { await Promise.race([LV.loading, new Promise(r => setTimeout(r, 12000))]); } catch (e) {} }
@@ -667,7 +669,7 @@ $('skipBtn').onclick = async () => { const r = await cmd('jumpNext'); if (r && r
 addEventListener('pointerdown', () => { if (AC && AC.state === 'suspended') AC.resume(); }, true); // sound starts on the first touch when Live opened by itself
 if (store.get('autostart', null) === 'whatif') { store.set('autostart', null); setTimeout(() => begin('whatif'), 50); }
 // Straight into Live: no menu in the way. #menu shows the other modes; #tv waits for a tap (fullscreen needs one).
-else if (BOOT !== 'menu' && BOOT !== 'tv' && BOOT !== 'news') { $('start').classList.add('auto'); setTimeout(() => begin('live'), 50); }
+else if (BOOT !== 'menu' && BOOT !== 'tv' && BOOT !== 'news') { $('start').classList.add('auto'); LV.hold = true; setTimeout(() => begin('live'), 50); } // loads Live behind the title; you pick Take command or the report
 
 // ---------------------------------------------------------------- main loop
 resize(); fitView(false); addEventListener('resize', () => { resize(); });

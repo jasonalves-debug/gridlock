@@ -36,7 +36,9 @@ body.bul #hud, body.bul #tools, body.bul #ticker, body.bul #pulse, body.bul #now
 #bul .board .row { display: flex; gap: 14px; justify-content: space-between; border-top: 2px dashed rgba(244,234,210,.3); padding-top: 8px; margin-top: 8px; }
 #bul .cap { position: absolute; left: 14px; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); max-width: 760px; font: 600 clamp(16px, 3.9vw, 20px)/1.35 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 4px #000, 0 0 10px #000; min-height: 2.7em; }
 #bul .skip { position: absolute; right: 14px; top: calc(env(safe-area-inset-top, 0px) + 12px); pointer-events: auto; font: 800 16px system-ui, sans-serif; color: #1b2a4a; background: #f4ead2; border: 0; border-radius: 8px; padding: 10px 14px; box-shadow: 0 3px 10px rgba(0,0,0,.5); cursor: pointer; }
-#newsQuick { display: none; margin: 12px 0 4px; font: 800 18px system-ui, sans-serif; color: #1b2a4a; background: #e9c46a; border: 0; border-radius: 10px; padding: 12px 18px; cursor: pointer; } #start.auto #newsQuick { display: inline-block; } #newsQuick.on { background: #f4ead2; }
+#launch { display: none; gap: 12px; flex-wrap: wrap; margin: 14px 0 6px; } #start.auto #launch { display: flex; }
+#launch button { flex: 1 1 220px; font: 800 22px system-ui, sans-serif; border: 0; border-radius: 12px; padding: 18px 20px; cursor: pointer; text-align: left; line-height: 1.2; } #launch button small { display: block; font: 600 16px/1.3 system-ui, sans-serif; margin-top: 6px; opacity: .85; }
+#goTake { background: #3ddc97; color: #06251a; } #newsQuick { background: #e9c46a; color: #1b2a4a; } #launch button.on { outline: 4px solid #fff; } #launch button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 560px) { #bul .skip { top: calc(env(safe-area-inset-top, 0px) + 58px); padding: 8px 12px; } #bul .bug b { font-size: 15px; } }
 #start .mode.news { border-color: #e9c46a; background: linear-gradient(135deg, rgba(233,196,106,.18), rgba(27,42,74,.5)); } #start .mode.news .tag { color: #e9c46a; }`;
   document.head.appendChild(st);
@@ -56,7 +58,8 @@ body.bul #hud, body.bul #tools, body.bul #ticker, body.bul #pulse, body.bul #now
     modes.insertBefore(b, modes.firstChild); }
   const tv = document.getElementById('tvBtn'); if (tv) { const nb = document.createElement('button'); nb.type = 'button'; nb.className = 'tool'; nb.id = 'newsBtn'; nb.hidden = true; nb.setAttribute('aria-label', 'Play my report'); nb.title = 'The Gridlock Report: what happened near you';
     nb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9l10-5" stroke-linecap="round"/><circle cx="8.5" cy="14.5" r="2.5"/><path d="M14 13h4M14 16h4" stroke-linecap="round"/></svg>'; tv.parentNode.insertBefore(nb, tv); }
-  const lede = document.getElementById('lede'); if (lede) { const q = document.createElement('button'); q.id = 'newsQuick'; q.type = 'button'; q.textContent = '▶ Play my morning report'; lede.after(q); }
+  const lede = document.getElementById('lede'); if (lede) { const w = document.createElement('div'); w.id = 'launch';
+    w.innerHTML = '<button type="button" id="goTake">Take command<small>The live map: dispatch, pursuits, roadblocks</small></button><button type="button" id="newsQuick">▶ My report<small>TV newscast of what is near you</small></button>'; lede.after(w); }
 })();
 function bulHM(ts) { return new Date(ts * 1000).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace('a.m.', 'AM').replace('p.m.', 'PM'); }
 function bulGeo() { // your position, or why we couldn't get it (falls back to the spot you saved last time)
@@ -76,7 +79,11 @@ function bulArm() {
 }
 $('goNews').onclick = bulGo;
 $('newsBtn').onclick = () => { if (BUL.on || !ready) return; snd('ui'); bulArm(); bulStart(); };
-$('newsQuick').onclick = () => { if (ready) { bulArm(); bulStart(); } else { bulArm(); } const q = $('newsQuick'); q.classList.add('on'); q.textContent = '✓ Your report starts when the map opens'; };
+function launchPick(k) { if (LV.pick || BUL.on) return; LV.pick = k; $(k === 'map' ? 'goTake' : 'newsQuick').classList.add('on'); $('goTake').disabled = $('newsQuick').disabled = true;
+  if (k === 'report') { bulArm(); if (ready) { BUL.want = false; launchRelease(); bulStart(); } else $('newsQuick').firstChild.textContent = '✓ Report starts when the map is ready'; }
+  else { audioInit(); if (ready) launchRelease(); else $('goTake').firstChild.textContent = '✓ Opening when ready'; } }
+$('goTake').onclick = () => launchPick('map');
+$('newsQuick').onclick = () => launchPick('report');
 if (location.hash === '#news') { const b = $('goNews'); b.classList.add('first'); setTimeout(() => b.scrollIntoView({ block: 'center' }), 50); }
 
 // ---------------------------------------------------------------- audio: a warm, band-limited "AM radio" voice chain, hiss and crackle, synthesised jingles and beds
@@ -146,8 +153,8 @@ function bulSpeakFallback(text, desk) { // the phone's own voice, for anything t
 async function bulSay(key, text, nocap) {
   const c = (BUL.data && BUL.data.clips && BUL.data.clips[key]) || {}; text = text || c.t || ''; if (!text && !c.f) return; const desk = (BUL.data && c.v && c.v === BUL.data.deskVoice) || key.startsWith('s:desk') || key === 'traffic' || key === 'weather';
   $('bulCap').textContent = nocap ? '' : text; bulDuck(true);
-  const buf = await bulLoad(key);
-  if (BUL.stop) return;
+  const g0 = BUL.gen, buf = await bulLoad(key);
+  if (BUL.stop || BUL.gen !== g0) return;
   if (buf) { const N = bulAudio(); await new Promise(res => { const s = AC.createBufferSource(); s.buffer = buf; N.wowG.connect(s.detune); s.connect(N.vin); s.onended = () => { BUL.srcs.delete(s); res(); }; BUL.srcs.add(s); s.start(); setTimeout(res, buf.duration * 1000 + 1500); }); }
   else await bulSpeakFallback(text, desk);
   bulDuck(false);
@@ -217,10 +224,10 @@ function bulBoard(kind) {
   B.classList.add('show');
 }
 function bulType(el, txt) { el.textContent = ''; let i = 0; clearInterval(el._t); el._t = setInterval(() => { el.textContent = txt.slice(0, ++i); if (i >= txt.length) clearInterval(el._t); }, 28); }
-async function bulRun() {
+async function bulRun(gen) {
   const seq = BUL.seq;
   for (const s of seq) {
-    if (BUL.stop) break;
+    if (BUL.stop || BUL.gen !== gen) return;
     if (s.k === 'card') { $('bulDate').textContent = new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase(); $('bulCard').classList.add('show'); }
     else if (s.k === 'cardOff') $('bulCard').classList.remove('show');
     else if (s.k === 'jingle') { const d = bulJingle(s.j); await bulWait(d * 1000 * (s.j === 'open' ? 1 : 0.8)); }
@@ -234,9 +241,10 @@ async function bulRun() {
     else if (s.k === 'say') { await bulSay(s.key, s.text, s.nocap); await bulWait(320); }
     else if (s.k === 'part') { await bulPlayPart(s.which); }
   }
-  bulEnd();
+  if (BUL.gen === gen) bulEnd();
 }
 async function bulStart() {
+  if (BUL.on) return; const gen = BUL.gen = (BUL.gen || 0) + 1; try { speechSynthesis.cancel(); } catch (e) {}
   BUL.on = true; BUL.stop = false; document.body.classList.add('bul'); $('bul').hidden = false; $('bulCap').textContent = ''; const lead = $('bulLead'); lead.hidden = false;
   const N = bulAudio(); if (N) N.hiss.gain.setTargetAtTime(0.012, AC.currentTime, 0.5);
   let n = 3; $('bulN').textContent = n; const tick = setInterval(() => { n = n > 1 ? n - 1 : 3; $('bulN').textContent = n; if (N) bTone(N.mus, AC.currentTime, 1000, 0.08, 0.05); }, 800);
@@ -255,8 +263,9 @@ async function bulStart() {
   BUL.seq = bulBuild(BUL.me, !!BUL.parts.front, !!BUL.parts.back);
   const keys = BUL.seq.filter(s => s.k === 'say').map(s => s.key); await Promise.race([Promise.all(keys.slice(0, 14).map(bulLoad)), bulWait(6000)]); keys.forEach(bulLoad);
   clearInterval(tick); clearInterval(sweep); lead.hidden = true;
+  if (BUL.gen !== gen || BUL.stop) return; // skipped while warming up
   if (BUL.me && BUL.me.inside) { cam.x = BUL.me.x; cam.y = BUL.me.y; cam.h = Math.max(cam.h, 6000); }
-  BUL.t0 = performance.now(); bulRun();
+  BUL.t0 = performance.now(); bulRun(gen);
 }
 function bulPlayPart(which) { // plays a produced part; its cue sheet drives the map
   const P = BUL.parts && BUL.parts[which]; if (!P || BUL.stop) return Promise.resolve();
@@ -300,7 +309,7 @@ function bulEpTick() {
   if (E.cardOff && t > E.cardOff) { $('bulCard').classList.remove('show'); E.cardOff = 0; }
 }
 function bulEnd() {
-  if (!BUL.on) return; BUL.on = false; BUL.stop = true; for (const s of BUL.srcs) { try { s.stop(); } catch (e) {} } BUL.srcs.clear(); try { speechSynthesis.cancel(); } catch (e) {}
+  if (!BUL.on) return; BUL.on = false; BUL.stop = true; BUL.gen = (BUL.gen || 0) + 1; for (const s of BUL.srcs) { try { s.stop(); } catch (e) {} } BUL.srcs.clear(); try { speechSynthesis.cancel(); } catch (e) {}
   bulBed(null); if (BUL.nodes) BUL.nodes.hiss.gain.setTargetAtTime(0, AC.currentTime, 0.4);
   document.body.classList.remove('bul'); $('bul').hidden = true; $('bulLow').classList.remove('show'); $('bulBoard').classList.remove('show'); $('bulCard').classList.remove('show'); BUL.marks = []; BUL.ring = null; BUL.ep = null;
   if (BUL.me && BUL.me.inside) camGoal = { x: BUL.me.x, y: BUL.me.y, h: 900 };
