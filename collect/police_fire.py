@@ -452,14 +452,28 @@ def build_location(ev, budget, cache):
         borough_part = f"{borough}, " if borough and borough != "Toronto" else ""
         query = f"{street} & {cross}, {borough_part}Toronto, Ontario, Canada"
         geo = local_geo.intersection(street, cross) or (local_geo.intersection(street, cross_parts[1]) if len(cross_parts) > 1 else None) or geocode_query(cache, key, {"q": query}, budget)
-        return geo, f"{loc_label}{street} & {cross}", False
+        if geo:
+            return geo, f"{loc_label}{street} & {cross}", False
+        # walkway code naming its corner ("WW E MANSE N LAWRENCE")
+        geo = next((g for g in map(local_geo.walkway, cross_parts) if g), None)
+        if geo:
+            return geo, f"{loc_label}{street} (walkway)", True
+        # cross "street" is a house number on the same road: look the address up instead
+        num = next((c for c in cross_parts if re.match(r"^\d+[A-Z]?\s+\S", c, re.I)), None)
+        if num:
+            geo = geocode_query(cache, f"addr:{num.lower()}|{borough.lower()}", {"q": f"{num}, {borough_part}Toronto, Ontario, Canada"}, budget)
+            if geo:
+                return geo, f"{loc_label}{num}", False
+        # path, hydro corridor or ramp: the middle of a short street is close enough
+        geo = local_geo.street_point(street)
+        return geo, f"{loc_label}{street} near {cross}", True
 
     # Case 4: street with no cross street at all — geocode the street + borough, low precision
     if street:
         key = f"sb:{street.lower()}|{borough.lower()}"
         borough_part = f"{borough}, " if borough and borough != "Toronto" else ""
         query = f"{street}, {borough_part}Toronto, Ontario, Canada"
-        geo = geocode_query(cache, key, {"q": query}, budget)
+        geo = local_geo.street_point(street) or geocode_query(cache, key, {"q": query}, budget)
         return geo, f"{street}{', ' + borough if borough else ''}", True
 
     return None, "Toronto", True
